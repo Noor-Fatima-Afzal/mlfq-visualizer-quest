@@ -1,13 +1,16 @@
-import { motion } from 'framer-motion';
-import { Cpu } from 'lucide-react';
-import { Process } from '@/types/mlfq';
+import { motion } from "framer-motion";
+import { Cpu } from "lucide-react";
+import { Process } from "@/types/mlfq";
 
 interface CPUVisualizerProps {
   activeProcess: Process | null;
   currentTime: number;
 }
 
-export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps) => {
+const CPUVisualizer: React.FC<CPUVisualizerProps> = ({
+  activeProcess,
+  currentTime,
+}) => {
   return (
     <div className="bg-card rounded-xl p-6 shadow-[var(--shadow-md)] border border-border">
       <div className="flex items-center gap-3 mb-6">
@@ -16,14 +19,21 @@ export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps
         </div>
         <div>
           <h3 className="font-semibold text-lg">CPU</h3>
-          <p className="text-sm text-muted-foreground">Current Time: {currentTime}ms</p>
+          <p className="text-sm text-muted-foreground">
+            Current Time: {currentTime}ms
+          </p>
         </div>
       </div>
 
-      <div className="relative min-h-[120px] border-2 rounded-lg p-6 flex items-center justify-center"
-        style={{ 
-          borderColor: activeProcess ? 'hsl(var(--process-active))' : 'hsl(var(--border))',
-          backgroundColor: activeProcess ? 'hsl(var(--process-active) / 0.05)' : 'transparent'
+      <div
+        className="relative min-h-[120px] border-2 rounded-lg p-6 flex items-center justify-center"
+        style={{
+          borderColor: activeProcess
+            ? "hsl(var(--process-active))"
+            : "hsl(var(--border))",
+          backgroundColor: activeProcess
+            ? "hsl(var(--process-active) / 0.05)"
+            : "transparent",
         }}
       >
         {activeProcess ? (
@@ -34,7 +44,7 @@ export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps
           >
             <motion.div
               className="inline-block p-4 rounded-full mb-3"
-              style={{ backgroundColor: 'hsl(var(--process-active) / 0.2)' }}
+              style={{ backgroundColor: "hsl(var(--process-active) / 0.2)" }}
               animate={{
                 scale: [1, 1.1, 1],
               }}
@@ -44,9 +54,15 @@ export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps
                 ease: "easeInOut",
               }}
             >
-              <Cpu className="w-8 h-8" style={{ color: 'hsl(var(--process-active))' }} />
+              <Cpu
+                className="w-8 h-8"
+                style={{ color: "hsl(var(--process-active))" }}
+              />
             </motion.div>
-            <h4 className="font-semibold text-lg mb-2" style={{ color: 'hsl(var(--process-active))' }}>
+            <h4
+              className="font-semibold text-lg mb-2"
+              style={{ color: "hsl(var(--process-active))" }}
+            >
               {activeProcess.name}
             </h4>
             <div className="space-y-1 text-sm text-muted-foreground">
@@ -64,8 +80,9 @@ export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps
         {activeProcess && (
           <motion.div
             className="absolute inset-0 rounded-lg"
-            style={{ 
-              background: 'radial-gradient(circle at center, hsl(var(--process-active) / 0.1) 0%, transparent 70%)'
+            style={{
+              background:
+                "radial-gradient(circle at center, hsl(var(--process-active) / 0.1) 0%, transparent 70%)",
             }}
             animate={{
               opacity: [0.3, 0.6, 0.3],
@@ -81,3 +98,5 @@ export const CPUVisualizer = ({ activeProcess, currentTime }: CPUVisualizerProps
     </div>
   );
 };
+
+export default CPUVisualizer;

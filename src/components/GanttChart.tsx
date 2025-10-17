@@ -1,15 +1,15 @@
-import { motion } from 'framer-motion';
-import { useSimulationStore } from '@/store/simulationStore';
-import { BarChart3 } from 'lucide-react';
+import { motion } from "framer-motion";
+import { useSimulationStore } from "@/store/simulationStore";
+import { BarChart3 } from "lucide-react";
 
-export const GanttChart = () => {
+const GanttChart: React.FC = () => {
   const { ganttChart, currentTime } = useSimulationStore();
 
   const getQueueColor = (level: number) => {
     const colors = [
-      'hsl(var(--queue-1))',
-      'hsl(var(--queue-2))',
-      'hsl(var(--queue-3))',
+      "hsl(var(--queue-1))",
+      "hsl(var(--queue-2))",
+      "hsl(var(--queue-3))",
     ];
     return colors[level] || colors[colors.length - 1];
   };
@@ -38,15 +38,17 @@ export const GanttChart = () => {
         <div className="space-y-4">
           {/* Timeline ruler */}
           <div className="relative h-8 border-b border-border">
-            {Array.from({ length: Math.ceil(maxTime / 10) + 1 }, (_, i) => i * 10).map((time) => (
-              <div
-                key={time}
-                className="absolute text-xs text-muted-foreground"
-                style={{ left: `${time * scale}px` }}
-              >
-                {time}
-              </div>
-            ))}
+            {Array.from({ length: Math.ceil(maxTime / 10) + 1 }, (_, i) => i * 10).map(
+              (time) => (
+                <div
+                  key={time}
+                  className="absolute text-xs text-muted-foreground"
+                  style={{ left: `${time * scale}px` }}
+                >
+                  {time}
+                </div>
+              )
+            )}
           </div>
 
           {/* Gantt bars */}
@@ -67,9 +69,11 @@ export const GanttChart = () => {
                     left: `${left}px`,
                     width: `${width}px`,
                     backgroundColor: color,
-                    transformOrigin: 'left',
+                    transformOrigin: "left",
                   }}
-                  title={`${entry.processName}: ${entry.startTime}ms - ${entry.endTime}ms (Q${entry.queueLevel + 1})`}
+                  title={`${entry.processName}: ${entry.startTime}ms - ${entry.endTime}ms (Q${
+                    entry.queueLevel + 1
+                  })`}
                 >
                   {width > 40 && entry.processName}
                 </motion.div>
@@ -85,7 +89,9 @@ export const GanttChart = () => {
                   className="w-4 h-4 rounded"
                   style={{ backgroundColor: getQueueColor(level) }}
                 />
-                <span className="text-sm text-muted-foreground">Q{level + 1}</span>
+                <span className="text-sm text-muted-foreground">
+                  Q{level + 1}
+                </span>
               </div>
             ))}
           </div>
@@ -94,3 +100,5 @@ export const GanttChart = () => {
     </div>
   );
 };
+
+export default GanttChart;
