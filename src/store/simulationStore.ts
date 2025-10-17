@@ -206,149 +206,148 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   // Core step logic
-  stepSimulation: () => {
-    const state = get();
-    // even if UI calls step manually, allow stepping when running or paused
-    // but if simulation is stopped entirely, do nothing
-    if (!state.isRunning) return;
+  // Core step logic (revised)
+stepSimulation: () => {
+  const state = get();
+  if (!state.isRunning) return;
 
-    // shallow-copy queues and processes to avoid accidental mutation issues
-    const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
-    const prevTime = state.currentTime;
-    const currentTime = prevTime + 1;
+  const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
+  const prevTime = state.currentTime;
+  const currentTime = prevTime + 1;
 
-    // Pick highest-priority non-empty queue
-    const activeQueue = queues.find((q) => q.processes.length > 0);
+  // Pick highest-priority non-empty queue
+  const activeQueue = queues.find((q) => q.processes.length > 0);
 
-    if (!activeQueue) {
-      // no process to run this tick
-      set({ currentTime, activeProcess: null });
-      get().updateMetrics();
-      // stop if nothing else and simulation was running — optionally auto-stop
-      const allQueuesEmpty = queues.every((q) => q.processes.length === 0);
-      if (allQueuesEmpty) {
-        // auto-stop
-        if (simulationInterval) {
-          clearInterval(simulationInterval);
-          simulationInterval = null;
-        }
-        set({ isRunning: false });
+  // If no active process at all
+  if (!activeQueue) {
+    // Still advance time (CPU idle)
+    set({ currentTime, activeProcess: null });
+    get().updateMetrics();
+
+    // Stop only when ALL queues empty AND all processes completed
+    const allQueuesEmpty = queues.every((q) => q.processes.length === 0);
+    const allDone = allQueuesEmpty && state.completedProcesses.length > 0;
+    if (allDone) {
+      if (simulationInterval) clearInterval(simulationInterval);
+      set({ isRunning: false });
+    }
+    return;
+  }
+
+  const procRef = activeQueue.processes[0];
+
+  // Mark first response time
+  if (procRef.responseTime === undefined) {
+    procRef.responseTime = currentTime - procRef.arrivalTime;
+  }
+
+  // Execute 1ms of CPU time
+  procRef.remainingTime -= 1;
+  procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+  procRef.state = 'running';
+
+  // Record Gantt entry
+  get().addGanttEntry({
+    processId: procRef.id,
+    queueLevel: activeQueue.level,
+    start: prevTime,
+    end: currentTime,
+  });
+
+  // Update waiting time for all other processes
+  queues.forEach((q) => {
+    q.processes.forEach((p) => {
+      if (p.id !== procRef.id && p.state !== 'completed') {
+        p.waitingTime = (p.waitingTime || 0) + 1;
       }
-      return;
-    }
-
-    // operate on the actual head process object inside queue
-    const procRef = activeQueue.processes[0];
-
-    // If response time not set, set it now (first time scheduled)
-    if (procRef.responseTime === undefined) {
-      procRef.responseTime = currentTime - procRef.arrivalTime;
-    }
-
-    // Execute 1ms
-    procRef.remainingTime -= 1;
-    procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
-    procRef.state = 'running';
-
-    // Add Gantt entry for this tick
-    get().addGanttEntry({
-      processId: procRef.id,
-      queueLevel: activeQueue.level,
-      start: prevTime,
-      end: currentTime,
     });
+  });
 
-    // Increase waiting time for other processes
-    queues.forEach((q) => {
-      q.processes.forEach((p) => {
-        if (p.id !== procRef.id && p.state !== 'completed') {
-          p.waitingTime = (p.waitingTime || 0) + 1;
-        }
-      });
-    });
+  // ✅ Completion check
+  const completedProcesses = [...state.completedProcesses];
+  if (procRef.remainingTime <= 0) {
+    procRef.turnaroundTime = currentTime - procRef.arrivalTime;
+    procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
+    procRef.state = 'completed';
 
-    // Completion check
-    const completedProcesses = [...state.completedProcesses];
-    if (procRef.remainingTime <= 0) {
-      procRef.turnaroundTime = currentTime - (procRef.arrivalTime ?? 0);
-      procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
-      procRef.state = 'completed';
+    activeQueue.processes.shift();
+    completedProcesses.push(procRef);
 
-      // remove from queue
-      activeQueue.processes.shift();
-      completedProcesses.push(procRef);
-
-      set({
-        queues,
-        currentTime,
-        activeProcess: null,
-        completedProcesses,
-      });
-
-      get().updateMetrics();
-
-      // if nothing left, stop the loop automatically
-      const anyLeft = queues.some((q) => q.processes.length > 0);
-      if (!anyLeft) {
-        if (simulationInterval) {
-          clearInterval(simulationInterval);
-          simulationInterval = null;
-        }
-        set({ isRunning: false });
-      }
-      return;
-    }
-
-    // Quantum expiry -> demote
-    if (procRef.quantumUsed >= activeQueue.timeQuantum) {
-      procRef.quantumUsed = 0;
-      activeQueue.processes.shift();
-      const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
-      // push to tail of next level
-      queues[nextLevel].processes.push({ ...procRef, state: 'waiting' });
-      // activeProcess becomes null here (will pick next)
-      set({
-        queues,
-        currentTime,
-        activeProcess: null,
-      });
-      get().updateMetrics();
-      return;
-    }
-
-    // Otherwise, keep process at head with updated remaining/quantum
-    activeQueue.processes[0] = procRef;
-
-    // Aging: promote from lower queues periodically (optional, simple approach)
-    if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
-      for (let lvl = queues.length - 1; lvl > 0; lvl--) {
-        const q = queues[lvl];
-        const promote: Process[] = [];
-        const keep: Process[] = [];
-        for (const p of q.processes) {
-          // simple aging condition: waitingTime >= agingInterval
-          if ((p.waitingTime || 0) >= state.agingInterval) {
-            promote.push({ ...p, quantumUsed: 0, state: 'waiting' });
-          } else {
-            keep.push(p);
-          }
-        }
-        if (promote.length > 0) {
-          q.processes = keep;
-          queues[lvl - 1].processes.push(...promote);
-        }
-      }
-    }
-
-    // commit updates
     set({
       queues,
       currentTime,
-      activeProcess: procRef,
+      activeProcess: null,
+      completedProcesses,
     });
 
     get().updateMetrics();
-  },
+
+    // Only stop if EVERYTHING is done
+    const allDone = queues.every((q) => q.processes.length === 0);
+    if (allDone) {
+      if (simulationInterval) clearInterval(simulationInterval);
+      set({ isRunning: false });
+    }
+    return;
+  }
+
+  // ✅ Quantum expiry → demote if possible
+  if (procRef.quantumUsed >= activeQueue.timeQuantum) {
+    procRef.quantumUsed = 0;
+    procRef.state = 'waiting';
+    activeQueue.processes.shift();
+
+    const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
+    queues[nextLevel].processes.push(procRef);
+
+    // Reset waiting time aging counter
+    procRef.waitingTime = 0;
+
+    set({
+      queues,
+      currentTime,
+      activeProcess: null,
+    });
+
+    get().updateMetrics();
+    return;
+  }
+
+  // ✅ Otherwise continue running at head
+  activeQueue.processes[0] = procRef;
+
+  // ✅ Aging: promote periodically
+  if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
+    for (let lvl = queues.length - 1; lvl > 0; lvl--) {
+      const q = queues[lvl];
+      const promote: Process[] = [];
+      const keep: Process[] = [];
+
+      for (const p of q.processes) {
+        if ((p.waitingTime || 0) >= state.agingInterval) {
+          promote.push({ ...p, quantumUsed: 0, state: 'waiting', waitingTime: 0 });
+        } else {
+          keep.push(p);
+        }
+      }
+
+      if (promote.length > 0) {
+        q.processes = keep;
+        queues[lvl - 1].processes.push(...promote);
+      }
+    }
+  }
+
+  // Commit updated state for this tick
+  set({
+    queues,
+    currentTime,
+    activeProcess: procRef,
+  });
+
+  get().updateMetrics();
+},
+
 
   // Metrics: include both completed and in-queues for live readings
   updateMetrics: () => {
