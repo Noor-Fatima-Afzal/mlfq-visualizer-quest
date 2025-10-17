@@ -1,22 +1,19 @@
-import { motion, AnimatePresence } from "framer-motion";
-import { Queue as QueueType } from "@/types/mlfq";
-import { ProcessToken } from "./ProcessToken";
-import { Layers } from "lucide-react";
+import { motion, AnimatePresence } from 'framer-motion';
+import { Queue as QueueType } from '@/types/mlfq';
+import { ProcessToken } from './ProcessToken';
+import { Layers } from 'lucide-react';
 
 interface QueueVisualizerProps {
   queue: QueueType;
   activeProcessId: string | null;
 }
 
-const QueueVisualizer: React.FC<QueueVisualizerProps> = ({
-  queue,
-  activeProcessId,
-}) => {
+export const QueueVisualizer = ({ queue, activeProcessId }: QueueVisualizerProps) => {
   const getQueueColor = (level: number) => {
     const colors = [
-      "hsl(var(--queue-1))",
-      "hsl(var(--queue-2))",
-      "hsl(var(--queue-3))",
+      'hsl(var(--queue-1))',
+      'hsl(var(--queue-2))',
+      'hsl(var(--queue-3))',
     ];
     return colors[level] || colors[colors.length - 1];
   };
@@ -33,7 +30,7 @@ const QueueVisualizer: React.FC<QueueVisualizerProps> = ({
     >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div
+          <div 
             className="p-2 rounded-lg"
             style={{ backgroundColor: `${queueColor}20` }}
           >
@@ -49,15 +46,11 @@ const QueueVisualizer: React.FC<QueueVisualizerProps> = ({
           </div>
         </div>
         <div className="text-sm font-medium text-muted-foreground">
-          {queue.processes.length}{" "}
-          {queue.processes.length === 1 ? "process" : "processes"}
+          {queue.processes.length} {queue.processes.length === 1 ? 'process' : 'processes'}
         </div>
       </div>
 
-      <div
-        className="min-h-[100px] border-2 border-dashed rounded-lg p-4"
-        style={{ borderColor: `${queueColor}30` }}
-      >
+      <div className="min-h-[100px] border-2 border-dashed rounded-lg p-4" style={{ borderColor: `${queueColor}30` }}>
         {queue.processes.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No processes in queue
@@ -80,5 +73,3 @@ const QueueVisualizer: React.FC<QueueVisualizerProps> = ({
     </motion.div>
   );
 };
-
-export default QueueVisualizer;
