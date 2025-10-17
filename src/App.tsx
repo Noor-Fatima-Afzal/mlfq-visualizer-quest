@@ -1,17 +1,41 @@
-// src/App.tsx
+// import { Toaster } from "@/components/ui/toaster";
+// import { Toaster as Sonner } from "@/components/ui/sonner";
+// import { TooltipProvider } from "@/components/ui/tooltip";
+// import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+// import { BrowserRouter, Routes, Route } from "react-router-dom";
+// import Index from "./pages/Index";
+// import NotFound from "./pages/NotFound";
+
+// const queryClient = new QueryClient();
+
+// const App = () => (
+//   <QueryClientProvider client={queryClient}>
+//     <TooltipProvider>
+//       <Toaster />
+//       <Sonner />
+//       <BrowserRouter>
+//         <Routes>
+//           <Route path="/" element={<Index />} />
+//           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+//           <Route path="*" element={<NotFound />} />
+//         </Routes>
+//       </BrowserRouter>
+//     </TooltipProvider>
+//   </QueryClientProvider>
+// );
+
+// export default App;
 import React from "react";
+import { Toaster } from "@/components/ui/toaster";
+import SimulationControls from "@/components/SimulationControls";
+import ControlPanel from "@/components/ControlPanel";
+import CPUVisualizer from "@/components/CPUVisualizer";
+import QueueVisualizer from "@/components/QueueVisualizer";
+import GanttChart from "@/components/GanttChart";
+import MetricsDashboard from "@/components/MetricsDashboard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
-import { Toaster } from "./components/ui/toaster";
-import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-import { Separator } from "./components/ui/separator";
-
-import SimulationControls from "./components/SimulationControls";
-import ControlPanel from "./components/ControlPanel";
-import CPUVisualizer from "./components/CPUVisualizer";
-import QueueVisualizer from "./components/QueueVisualizer";
-import GanttChart from "./components/GanttChart";
-import MetricsDashboard from "./components/MetricsDashboard";
-
 import "./App.css";
 
 const App: React.FC = () => {
@@ -32,7 +56,7 @@ const App: React.FC = () => {
       </motion.header>
 
       <main className="flex flex-col lg:flex-row gap-6">
-        {/* Left Column — Controls + Queues */}
+        {/* Left Column — Control + Queues */}
         <div className="flex-1 flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -96,8 +120,7 @@ const App: React.FC = () => {
       {/* Footer */}
       <Separator className="my-6" />
       <footer className="text-center text-gray-500 text-sm">
-        Educational CPU Scheduling Simulator • Built with React, Zustand, and
-        Framer Motion
+        Educational CPU Scheduling Simulator • Built with React, Zustand, and Framer Motion
       </footer>
 
       {/* Toast Notifications */}
