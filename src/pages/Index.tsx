@@ -86,12 +86,14 @@ const Index = () => {
         );
 
         store.setQueues(updatedQueues);
-        store.updateMetrics();
         useSimulationStore.setState({
           completedProcesses: [...completedProcesses, completedProcess],
           currentTime: currentTime + 1,
           activeProcess: null,
         });
+        
+        // Update metrics after state is updated
+        setTimeout(() => store.updateMetrics(), 0);
       }
       // Check if quantum expired
       else if (newQuantumUsed >= timeQuantum) {
