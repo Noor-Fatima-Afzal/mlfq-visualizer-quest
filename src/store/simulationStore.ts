@@ -541,13 +541,18 @@ interface SimulationStore extends SimulationState {
 }
 
 // Fixed: Proper 4-queue setup with correct scheduling policies
+// const initialQueues: Queue[] = [
+//   { level: 0, timeQuantum: 4, processes: [] },  // Q1: Round Robin
+//   { level: 1, timeQuantum: 8, processes: [] },  // Q2: Round Robin  
+//   { level: 2, timeQuantum: 0, processes: [] },  // Q3: SJF (no quantum needed)
+//   { level: 3, timeQuantum: 0, processes: [] },  // Q4: FCFS (no quantum needed)
+// ]; 
 const initialQueues: Queue[] = [
-  { level: 0, timeQuantum: 4, processes: [] },  // Q1: Round Robin
-  { level: 1, timeQuantum: 8, processes: [] },  // Q2: Round Robin  
-  { level: 2, timeQuantum: 0, processes: [] },  // Q3: SJF (no quantum needed)
-  { level: 3, timeQuantum: 0, processes: [] },  // Q4: FCFS (no quantum needed)
+  { level: 0, timeQuantum: 4, processes: [] },  // Q1: RR
+  { level: 1, timeQuantum: 8, processes: [] },  // Q2: RR  
+  { level: 2, timeQuantum: 0, processes: [] },  // Q3: SJF
+  { level: 3, timeQuantum: 0, processes: [] },  // Q4: FCFS
 ];
-
 const calculateMetrics = (all: Process[], completed: Process[], currentTime: number) => {
   if (all.length === 0) {
     return {
@@ -722,190 +727,166 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
-  // ✅ CORRECTED Core MLFQ Simulation Step
-  stepSimulation: () => {
-    const state = get();
-    if (!state.isRunning || state.isPaused) return;
+// ✅ FIXED Core MLFQ Simulation Step
+stepSimulation: () => {
+  const state = get();
+  if (!state.isRunning || state.isPaused) return;
 
-    // Create deep copies of queues
-    const queues: Queue[] = state.queues.map((q) => ({
-      ...q,
-      processes: q.processes.map(p => ({ ...p }))
-    }));
-    
-    const currentTime = state.currentTime + 1;
-    const completedProcesses = [...state.completedProcesses];
-    
-    // Reset previous active process state if needed
-    const previousActive = state.activeProcess;
-    if (previousActive) {
-      queues.forEach(q => {
-        q.processes.forEach(p => {
-          if (p.id === previousActive.id && p.state === 'running' && p.remainingTime > 0) {
-            p.state = 'waiting';
-          }
-        });
-      });
-    }
-
-    // Find highest priority non-empty queue
-    const activeQueue = queues.find(q => q.processes.length > 0);
-    
-    if (!activeQueue) {
-      // CPU idle - no processes to run
-      set({ 
-        currentTime, 
-        activeProcess: null,
-        queues 
-      });
-      get().updateMetrics();
-      
-      // Stop simulation if everything is done
-      if (completedProcesses.length > 0) {
-        if (simulationInterval) {
-          clearInterval(simulationInterval);
-          simulationInterval = null;
-        }
-        set({ isRunning: false });
-      }
-      return;
-    }
-
-    let procRef: Process;
-
-    // ✅ Apply correct scheduling policies based on queue level
-    switch (activeQueue.level) {
-      case 0: // Q1: Round Robin (highest priority)
-      case 1: // Q2: Round Robin
-        procRef = activeQueue.processes[0]; // Take first in queue (FIFO for RR)
-        break;
-        
-      case 2: // Q3: Shortest Job First
-        // Sort by remaining time (SJF)
-        activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
-        procRef = activeQueue.processes[0];
-        break;
-        
-      case 3: // Q4: First Come First Serve (lowest priority)
-        // Sort by arrival time (FCFS)
-        activeQueue.processes.sort((a, b) => a.arrivalTime - b.arrivalTime);
-        procRef = activeQueue.processes[0];
-        break;
-        
-      default:
-        procRef = activeQueue.processes[0];
-    }
-
-    // Mark response time if this is the first time running
-    if (procRef.responseTime === undefined) {
-      procRef.responseTime = currentTime - procRef.arrivalTime;
-    }
-
-    // Execute 1 time unit
-    procRef.remainingTime -= 1;
-    procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
-    procRef.state = 'running';
-
-    // Create new Gantt chart entry (don't extend previous entries)
-    const ganttEntry: GanttEntry = {
-      processId: procRef.id,
-      queueLevel: activeQueue.level,
-      start: currentTime - 1,
-      end: currentTime,
-    };
-    get().addGanttEntry(ganttEntry);
-
-    // Update waiting time for all other ready processes
-    queues.forEach(q => {
-      q.processes.forEach(p => {
-        if (p.id !== procRef.id && p.state !== 'completed' && p.remainingTime > 0) {
-          p.waitingTime = (p.waitingTime || 0) + 1;
-        }
-      });
+  const queues: Queue[] = JSON.parse(JSON.stringify(state.queues)); // Deep clone
+  let currentTime = state.currentTime + 1;
+  const completedProcesses = [...state.completedProcesses];
+  
+  // Find highest priority non-empty queue
+  const activeQueue = queues.find(q => q.processes.length > 0);
+  
+  if (!activeQueue) {
+    // CPU idle - no processes to run
+    set({ 
+      currentTime, 
+      activeProcess: null,
+      queues 
     });
-
-    // ✅ Check for process completion
-    if (procRef.remainingTime <= 0) {
-      procRef.turnaroundTime = currentTime - procRef.arrivalTime;
-      procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
-      procRef.state = 'completed';
-      procRef.completionTime = currentTime;
-
-      // Remove from active queue and add to completed
-      activeQueue.processes = activeQueue.processes.filter(p => p.id !== procRef.id);
-      completedProcesses.push(procRef);
-
-      set({
-        queues,
-        currentTime,
-        activeProcess: null,
-        completedProcesses,
-      });
-
-      get().updateMetrics();
-      return;
-    }
-
-    // ✅ Demotion rules for Round Robin queues only
-    if (activeQueue.level < 2 && procRef.quantumUsed >= activeQueue.timeQuantum) {
-      procRef.quantumUsed = 0;
-      procRef.state = 'waiting';
-      
-      // Remove from current queue
-      activeQueue.processes = activeQueue.processes.filter(p => p.id !== procRef.id);
-      
-      // Move to next lower queue (demote)
-      const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
-      queues[nextLevel].processes.push(procRef);
-
-      set({
-        queues,
-        currentTime,
-        activeProcess: null,
-      });
-
-      get().updateMetrics();
-      return;
-    }
-
-    // ✅ Fixed Aging Promotion (moves starving processes to higher queues)
-    if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
-      for (let lvl = queues.length - 1; lvl > 0; lvl--) {
-        const q = queues[lvl];
-        const promote: Process[] = [];
-        const keep: Process[] = [];
-
-        for (const p of q.processes) {
-          // Don't promote the currently running process
-          if (p.id !== procRef?.id && (p.waitingTime || 0) >= state.agingInterval) {
-            promote.push({ 
-              ...p, 
-              quantumUsed: 0, 
-              state: 'waiting'
-              // Note: Don't reset waitingTime to maintain aging counter
-            });
-          } else {
-            keep.push(p);
-          }
-        }
-
-        if (promote.length > 0) {
-          q.processes = keep;
-          // Promote to next higher queue
-          queues[lvl - 1].processes.push(...promote);
-        }
+    get().updateMetrics();
+    
+    // Stop simulation if everything is done
+    if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
+      if (simulationInterval) {
+        clearInterval(simulationInterval);
+        simulationInterval = null;
       }
+      set({ isRunning: false });
     }
+    return;
+  }
 
-    // ✅ Commit final state for continuing execution
+  let procRef: Process;
+
+  // ✅ Apply correct scheduling policies
+  switch (activeQueue.level) {
+    case 0: // Q1: Round Robin
+    case 1: // Q2: Round Robin
+      // For RR, just take the first process (FIFO)
+      procRef = activeQueue.processes[0];
+      break;
+      
+    case 2: // Q3: Shortest Job First
+      // Sort by remaining time and take shortest
+      activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
+      procRef = activeQueue.processes[0];
+      break;
+      
+    case 3: // Q4: First Come First Serve
+      // Sort by arrival time and take earliest
+      activeQueue.processes.sort((a, b) => a.arrivalTime - b.arrivalTime);
+      procRef = activeQueue.processes[0];
+      break;
+      
+    default:
+      procRef = activeQueue.processes[0];
+  }
+
+  // Remove from current position (will be re-added if not completed/demoted)
+  activeQueue.processes = activeQueue.processes.filter(p => p.id !== procRef.id);
+
+  // Mark response time if first execution
+  if (procRef.responseTime === undefined) {
+    procRef.responseTime = currentTime - procRef.arrivalTime;
+  }
+
+  // Execute 1 time unit
+  procRef.remainingTime -= 1;
+  procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+  procRef.state = 'running';
+
+  // ✅ FIXED: Add Gantt chart entry (always create new entry)
+  const ganttEntry: GanttEntry = {
+    processId: procRef.id,
+    queueLevel: activeQueue.level,
+    start: currentTime - 1,
+    end: currentTime,
+  };
+  set((state) => ({ 
+    ganttChart: [...state.ganttChart, ganttEntry] 
+  }));
+
+  // Update waiting time for all other ready processes
+  queues.forEach(q => {
+    q.processes.forEach(p => {
+      if (p.id !== procRef.id && p.state !== 'completed' && p.remainingTime > 0) {
+        p.waitingTime = (p.waitingTime || 0) + 1;
+      }
+    });
+  });
+
+  // ✅ Check for process completion
+  if (procRef.remainingTime <= 0) {
+    procRef.turnaroundTime = currentTime - procRef.arrivalTime;
+    procRef.waitingTime = (procRef.waitingTime || 0);
+    procRef.state = 'completed';
+    
+    completedProcesses.push(procRef);
+    
     set({
       queues,
       currentTime,
-      activeProcess: procRef,
+      activeProcess: null,
+      completedProcesses,
     });
 
     get().updateMetrics();
-  },
+    return;
+  }
+
+  // ✅ Demotion rules for Round Robin queues only
+  if (activeQueue.level < 2 && procRef.quantumUsed >= activeQueue.timeQuantum) {
+    // Time quantum expired - demote to next lower queue
+    procRef.quantumUsed = 0;
+    procRef.state = 'waiting';
+    
+    const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
+    queues[nextLevel].processes.push(procRef);
+  } else {
+    // Not completed and quantum not expired - return to same queue
+    procRef.state = 'waiting';
+    activeQueue.processes.push(procRef);
+  }
+
+  // ✅ Fixed Aging Promotion 
+  if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
+    for (let lvl = queues.length - 1; lvl > 0; lvl--) {
+      const q = queues[lvl];
+      const promote: Process[] = [];
+      const keep: Process[] = [];
+
+      for (const p of q.processes) {
+        // Promote processes that have been waiting too long
+        if ((p.waitingTime || 0) >= state.agingInterval) {
+          promote.push({ 
+            ...p, 
+            quantumUsed: 0, 
+            state: 'waiting'
+          });
+        } else {
+          keep.push(p);
+        }
+      }
+
+      if (promote.length > 0) {
+        q.processes = keep;
+        queues[lvl - 1].processes.push(...promote);
+      }
+    }
+  }
+
+  // ✅ Commit final state
+  set({
+    queues,
+    currentTime,
+    activeProcess: procRef,
+  });
+
+  get().updateMetrics();
+},
 
   // Metrics
   updateMetrics: () => {
