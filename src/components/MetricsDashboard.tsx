@@ -1,45 +1,45 @@
-import { motion } from 'framer-motion';
-import { useSimulationStore } from '@/store/simulationStore';
-import { Clock, TrendingUp, Timer, Activity, Zap } from 'lucide-react';
+import { motion } from "framer-motion";
+import { useSimulationStore } from "@/store/simulationStore";
+import { Clock, TrendingUp, Timer, Activity, Zap } from "lucide-react";
 
-export const MetricsDashboard = () => {
+const MetricsDashboard: React.FC = () => {
   const { metrics } = useSimulationStore();
 
   const metricCards = [
     {
-      label: 'Avg Turnaround Time',
+      label: "Avg Turnaround Time",
       value: metrics.avgTurnaroundTime.toFixed(2),
-      unit: 'ms',
+      unit: "ms",
       icon: Clock,
-      color: 'hsl(var(--queue-1))',
+      color: "hsl(var(--queue-1))",
     },
     {
-      label: 'Avg Waiting Time',
+      label: "Avg Waiting Time",
       value: metrics.avgWaitingTime.toFixed(2),
-      unit: 'ms',
+      unit: "ms",
       icon: Timer,
-      color: 'hsl(var(--queue-2))',
+      color: "hsl(var(--queue-2))",
     },
     {
-      label: 'Avg Response Time',
+      label: "Avg Response Time",
       value: metrics.avgResponseTime.toFixed(2),
-      unit: 'ms',
+      unit: "ms",
       icon: Activity,
-      color: 'hsl(var(--queue-3))',
+      color: "hsl(var(--queue-3))",
     },
     {
-      label: 'Throughput',
+      label: "Throughput",
       value: metrics.throughput.toFixed(3),
-      unit: 'proc/ms',
+      unit: "proc/ms",
       icon: TrendingUp,
-      color: 'hsl(var(--process-active))',
+      color: "hsl(var(--process-active))",
     },
     {
-      label: 'CPU Utilization',
+      label: "CPU Utilization",
       value: metrics.cpuUtilization.toFixed(1),
-      unit: '%',
+      unit: "%",
       icon: Zap,
-      color: 'hsl(var(--process-completed))',
+      color: "hsl(var(--process-completed))",
     },
   ];
 
@@ -56,7 +56,7 @@ export const MetricsDashboard = () => {
             className="bg-card rounded-xl p-4 shadow-[var(--shadow-md)] border border-border"
           >
             <div className="flex items-center gap-2 mb-3">
-              <div 
+              <div
                 className="p-2 rounded-lg"
                 style={{ backgroundColor: `${metric.color}20` }}
               >
@@ -67,10 +67,15 @@ export const MetricsDashboard = () => {
               </span>
             </div>
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold" style={{ color: metric.color }}>
+              <span
+                className="text-2xl font-bold"
+                style={{ color: metric.color }}
+              >
                 {metric.value}
               </span>
-              <span className="text-sm text-muted-foreground">{metric.unit}</span>
+              <span className="text-sm text-muted-foreground">
+                {metric.unit}
+              </span>
             </div>
           </motion.div>
         );
@@ -78,3 +83,5 @@ export const MetricsDashboard = () => {
     </div>
   );
 };
+
+export default MetricsDashboard;
