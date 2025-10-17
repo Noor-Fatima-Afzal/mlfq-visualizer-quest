@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { Plus, Settings2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
-import { useSimulationStore } from "@/store/simulationStore";
+import { useState } from 'react';
+import { Plus, Settings2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { useSimulationStore } from '@/store/simulationStore';
 import {
   Dialog,
   DialogContent,
@@ -12,22 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 
-const ControlPanel: React.FC = () => {
-  const {
-    addProcess,
-    numQueues,
-    setNumQueues,
-    queues,
-    setTimeQuantum,
-    agingInterval,
-    setAgingInterval,
-  } = useSimulationStore();
-
-  const [processName, setProcessName] = useState("");
-  const [arrivalTime, setArrivalTime] = useState("0");
-  const [burstTime, setBurstTime] = useState("10");
+export const ControlPanel = () => {
+  const { addProcess, numQueues, setNumQueues, queues, setTimeQuantum, agingInterval, setAgingInterval } = useSimulationStore();
+  const [processName, setProcessName] = useState('');
+  const [arrivalTime, setArrivalTime] = useState('0');
+  const [burstTime, setBurstTime] = useState('10');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleAddProcess = () => {
@@ -38,9 +29,9 @@ const ControlPanel: React.FC = () => {
         burstTime: parseInt(burstTime),
         priority: 0,
       });
-      setProcessName("");
-      setArrivalTime("0");
-      setBurstTime("10");
+      setProcessName('');
+      setArrivalTime('0');
+      setBurstTime('10');
     }
   };
 
@@ -71,9 +62,7 @@ const ControlPanel: React.FC = () => {
                   min="1"
                   max="5"
                   value={numQueues}
-                  onChange={(e) =>
-                    setNumQueues(parseInt(e.target.value) || 1)
-                  }
+                  onChange={(e) => setNumQueues(parseInt(e.target.value) || 1)}
                 />
               </div>
 
@@ -87,9 +76,7 @@ const ControlPanel: React.FC = () => {
                     type="number"
                     min="1"
                     value={queue.timeQuantum}
-                    onChange={(e) =>
-                      setTimeQuantum(queue.level, parseInt(e.target.value) || 1)
-                    }
+                    onChange={(e) => setTimeQuantum(queue.level, parseInt(e.target.value) || 1)}
                   />
                 </div>
               ))}
@@ -101,9 +88,7 @@ const ControlPanel: React.FC = () => {
                   type="number"
                   min="1"
                   value={agingInterval}
-                  onChange={(e) =>
-                    setAgingInterval(parseInt(e.target.value) || 1)
-                  }
+                  onChange={(e) => setAgingInterval(parseInt(e.target.value) || 1)}
                 />
               </div>
             </div>
@@ -154,5 +139,3 @@ const ControlPanel: React.FC = () => {
     </Card>
   );
 };
-
-export default ControlPanel;
