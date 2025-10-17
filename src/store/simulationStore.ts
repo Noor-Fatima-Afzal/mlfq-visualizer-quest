@@ -2,27 +2,34 @@ import { create } from 'zustand';
 import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
 
 interface SimulationStore extends SimulationState {
-  // Configuration
   numQueues: number;
   agingInterval: number;
-  
-  // Actions
+
   setQueues: (queues: Queue[]) => void;
-  addProcess: (process: Omit<Process, 'id' | 'remainingTime' | 'waitingTime' | 'turnaroundTime' | 'quantumUsed' | 'state'>) => void;
+  addProcess: (
+    process: Omit<
+      Process,
+      | 'id'
+      | 'remainingTime'
+      | 'waitingTime'
+      | 'turnaroundTime'
+      | 'quantumUsed'
+      | 'state'
+      | 'responseTime'
+    >
+  ) => void;
   removeProcess: (id: string) => void;
   updateProcess: (id: string, updates: Partial<Process>) => void;
   setNumQueues: (num: number) => void;
   setTimeQuantum: (queueLevel: number, quantum: number) => void;
   setAgingInterval: (interval: number) => void;
-  
-  // Simulation controls
+
   startSimulation: () => void;
   pauseSimulation: () => void;
   resumeSimulation: () => void;
   resetSimulation: () => void;
   stepSimulation: () => void;
-  
-  // Internal
+
   updateMetrics: () => void;
   addGanttEntry: (entry: GanttEntry) => void;
 }
@@ -34,7 +41,7 @@ const initialQueues: Queue[] = [
 ];
 
 const calculateMetrics = (completed: Process[], currentTime: number) => {
-  if (completed.length === 0) {
+  if (completed.length === 0)
     return {
       avgTurnaroundTime: 0,
       avgWaitingTime: 0,
@@ -42,12 +49,11 @@ const calculateMetrics = (completed: Process[], currentTime: number) => {
       throughput: 0,
       cpuUtilization: 0,
     };
-  }
 
-  const totalTurnaround = completed.reduce((sum, p) => sum + p.turnaroundTime, 0);
-  const totalWaiting = completed.reduce((sum, p) => sum + p.waitingTime, 0);
-  const totalResponse = completed.reduce((sum, p) => sum + (p.responseTime || 0), 0);
-  const totalBurst = completed.reduce((sum, p) => sum + p.burstTime, 0);
+  const totalTurnaround = completed.reduce((s, p) => s + p.turnaroundTime, 0);
+  const totalWaiting = completed.reduce((s, p) => s + p.waitingTime, 0);
+  const totalResponse = completed.reduce((s, p) => s + (p.responseTime || 0), 0);
+  const totalBurst = completed.reduce((s, p) => s + p.burstTime, 0);
 
   return {
     avgTurnaroundTime: totalTurnaround / completed.length,
@@ -78,87 +84,75 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   setQueues: (queues) => set({ queues }),
 
-  addProcess: (processData) => {
-    const state = get();
+  addProcess: (data) => {
     const id = `P${Date.now()}`;
     const newProcess: Process = {
-      ...processData,
+      ...data,
       id,
-      remainingTime: processData.burstTime,
+      remainingTime: data.burstTime,
       waitingTime: 0,
       turnaroundTime: 0,
       quantumUsed: 0,
+      responseTime: undefined,
       state: 'waiting',
     };
 
-    const updatedQueues = [...state.queues];
-    if (updatedQueues[0]) {
-      updatedQueues[0] = {
-        ...updatedQueues[0],
-        processes: [...updatedQueues[0].processes, newProcess],
-      };
-    }
-
-    set({ queues: updatedQueues });
+    set((state) => {
+      const updated = [...state.queues];
+      updated[0].processes.push(newProcess);
+      return { queues: updated };
+    });
   },
 
   removeProcess: (id) => {
-    const state = get();
-    const updatedQueues = state.queues.map(queue => ({
-      ...queue,
-      processes: queue.processes.filter(p => p.id !== id),
+    set((state) => ({
+      queues: state.queues.map((q) => ({
+        ...q,
+        processes: q.processes.filter((p) => p.id !== id),
+      })),
     }));
-    set({ queues: updatedQueues });
   },
 
   updateProcess: (id, updates) => {
-    const state = get();
-    const updatedQueues = state.queues.map(queue => ({
-      ...queue,
-      processes: queue.processes.map(p => 
-        p.id === id ? { ...p, ...updates } : p
-      ),
+    set((state) => ({
+      queues: state.queues.map((q) => ({
+        ...q,
+        processes: q.processes.map((p) =>
+          p.id === id ? { ...p, ...updates } : p
+        ),
+      })),
     }));
-    set({ queues: updatedQueues });
   },
 
-  setNumQueues: (num) => {
-    const state = get();
-    const newQueues: Queue[] = [];
-    
-    for (let i = 0; i < num; i++) {
-      const existingQueue = state.queues[i];
-      newQueues.push({
-        level: i,
-        timeQuantum: existingQueue?.timeQuantum || Math.pow(2, i + 2),
-        processes: existingQueue?.processes || [],
-      });
-    }
-    
-    set({ numQueues: num, queues: newQueues });
-  },
+  setNumQueues: (num) =>
+    set((state) => {
+      const newQueues: Queue[] = [];
+      for (let i = 0; i < num; i++) {
+        newQueues.push({
+          level: i,
+          timeQuantum: state.queues[i]?.timeQuantum || Math.pow(2, i + 2),
+          processes: state.queues[i]?.processes || [],
+        });
+      }
+      return { numQueues: num, queues: newQueues };
+    }),
 
-  setTimeQuantum: (queueLevel, quantum) => {
-    const state = get();
-    const updatedQueues = state.queues.map(queue =>
-      queue.level === queueLevel ? { ...queue, timeQuantum: quantum } : queue
-    );
-    set({ queues: updatedQueues });
-  },
+  setTimeQuantum: (level, quantum) =>
+    set((state) => ({
+      queues: state.queues.map((q) =>
+        q.level === level ? { ...q, timeQuantum: quantum } : q
+      ),
+    })),
 
   setAgingInterval: (interval) => set({ agingInterval: interval }),
 
   startSimulation: () => set({ isRunning: true, isPaused: false }),
-  
   pauseSimulation: () => set({ isPaused: true }),
-  
   resumeSimulation: () => set({ isPaused: false }),
-  
+
   resetSimulation: () => {
-    const state = get();
-    const resetQueues = state.queues.map(q => ({ ...q, processes: [] }));
     set({
-      queues: resetQueues,
+      queues: initialQueues.map((q) => ({ ...q, processes: [] })),
       currentTime: 0,
       isRunning: false,
       isPaused: false,
@@ -177,18 +171,78 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   stepSimulation: () => {
     const state = get();
-    // This will be implemented with the actual MLFQ algorithm
-    console.log('Step simulation', state.currentTime);
+    if (state.isPaused || !state.isRunning) return;
+
+    const queues = [...state.queues];
+    const active =
+      state.activeProcess ||
+      queues.find((q) => q.processes.length > 0)?.processes[0] ||
+      null;
+
+    if (!active) return;
+
+    const queueLevel = queues.findIndex((q) =>
+      q.processes.some((p) => p.id === active.id)
+    );
+    const currentQueue = queues[queueLevel];
+
+    if (active.responseTime === undefined) {
+      active.responseTime = state.currentTime - active.arrivalTime;
+    }
+
+    // Execute 1ms of CPU time
+    active.remainingTime -= 1;
+    active.quantumUsed += 1;
+
+    // Record in Gantt chart
+    get().addGanttEntry({
+      processId: active.id,
+      start: state.currentTime,
+      end: state.currentTime + 1,
+      queueLevel,
+    });
+
+    let completed = [...state.completedProcesses];
+    let newActive: Process | null = active;
+
+    if (active.remainingTime <= 0) {
+      active.turnaroundTime = state.currentTime + 1 - active.arrivalTime;
+      completed = [...completed, active];
+      queues[queueLevel].processes = queues[queueLevel].processes.filter(
+        (p) => p.id !== active.id
+      );
+      newActive = null;
+    } else if (active.quantumUsed >= currentQueue.timeQuantum) {
+      // demote process
+      queues[queueLevel].processes = queues[queueLevel].processes.filter(
+        (p) => p.id !== active.id
+      );
+      const nextLevel = Math.min(queueLevel + 1, queues.length - 1);
+      queues[nextLevel].processes.push({ ...active, quantumUsed: 0 });
+      newActive = null;
+    }
+
+    const nextActive =
+      newActive ||
+      queues.find((q) => q.processes.length > 0)?.processes[0] ||
+      null;
+
+    set({
+      queues,
+      currentTime: state.currentTime + 1,
+      activeProcess: nextActive,
+      completedProcesses: completed,
+    });
+
+    get().updateMetrics();
   },
 
   updateMetrics: () => {
-    const state = get();
-    const metrics = calculateMetrics(state.completedProcesses, state.currentTime);
+    const { completedProcesses, currentTime } = get();
+    const metrics = calculateMetrics(completedProcesses, currentTime);
     set({ metrics });
   },
 
-  addGanttEntry: (entry) => {
-    const state = get();
-    set({ ganttChart: [...state.ganttChart, entry] });
-  },
+  addGanttEntry: (entry) =>
+    set((state) => ({ ganttChart: [...state.ganttChart, entry] })),
 }));
