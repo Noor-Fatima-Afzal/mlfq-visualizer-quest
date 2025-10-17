@@ -1,7 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Queue as QueueType } from "@/types/mlfq";
-import ProcessToken from "./ProcessToken";
-
+import { ProcessToken } from "./ProcessToken";
 import { Layers } from "lucide-react";
 
 interface QueueVisualizerProps {
