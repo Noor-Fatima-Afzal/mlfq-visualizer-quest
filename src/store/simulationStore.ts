@@ -1,4 +1,4 @@
-// // src/store/simulationStore.ts
+
 // import { create } from 'zustand';
 // import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
 
@@ -16,7 +16,6 @@
 //       | 'turnaroundTime'
 //       | 'quantumUsed'
 //       | 'state'
-//       | 'arrivalTime'
 //       | 'responseTime'
 //     >
 //   ) => void;
@@ -63,7 +62,8 @@
 //     avgWaitingTime: completed.length > 0 ? totalWaiting / completed.length : 0,
 //     avgResponseTime: completed.length > 0 ? totalResponse / completed.length : 0,
 //     throughput: completed.length / Math.max(currentTime, 1),
-//     cpuUtilization: currentTime > 0 ? (totalBurst / currentTime) * 100 : 0,
+//     cpuUtilization:
+//       currentTime > 0 ? Math.min((totalBurst / currentTime) * 100, 100) : 0,
 //   };
 // };
 
@@ -78,7 +78,7 @@
 //   ganttChart: [],
 //   activeProcess: null,
 //   numQueues: 3,
-//   agingInterval: 5,
+//   agingInterval: 10,
 //   metrics: {
 //     avgTurnaroundTime: 0,
 //     avgWaitingTime: 0,
@@ -95,21 +95,18 @@
 //     const newProcess: Process = {
 //       ...data,
 //       id,
-//       arrivalTime: get().currentTime,
 //       remainingTime: data.burstTime,
 //       waitingTime: 0,
 //       turnaroundTime: 0,
 //       quantumUsed: 0,
 //       responseTime: undefined,
 //       state: 'waiting',
+//       arrivalTime: get().currentTime,
 //     };
 
 //     set((state) => {
-//       const updated = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
-//       // push to highest priority queue (level 0)
-//       if (updated[0]) updated[0].processes.push(newProcess);
-//       else updated[0] = { level: 0, timeQuantum: 4, processes: [newProcess] };
-
+//       const updated = [...state.queues];
+//       updated[0].processes.push(newProcess);
 //       return { queues: updated };
 //     });
 //   },
@@ -130,7 +127,9 @@
 //         ...q,
 //         processes: q.processes.map((p) => (p.id === id ? { ...p, ...updates } : p)),
 //       })),
-//       completedProcesses: state.completedProcesses.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+//       completedProcesses: state.completedProcesses.map((p) =>
+//         p.id === id ? { ...p, ...updates } : p
+//       ),
 //     }));
 //   },
 
@@ -150,12 +149,14 @@
 
 //   setTimeQuantum: (level, quantum) =>
 //     set((state) => ({
-//       queues: state.queues.map((q) => (q.level === level ? { ...q, timeQuantum: quantum } : q)),
+//       queues: state.queues.map((q) =>
+//         q.level === level ? { ...q, timeQuantum: quantum } : q
+//       ),
 //     })),
 
 //   setAgingInterval: (interval) => set({ agingInterval: interval }),
 
-//   // Simulation control: start / pause / resume / reset
+//   // Simulation Control
 //   startSimulation: () => {
 //     const { isRunning } = get();
 //     if (isRunning) return;
@@ -168,18 +169,14 @@
 //       const { isRunning: running, isPaused } = get();
 //       if (!running || isPaused) return;
 //       get().stepSimulation();
-//     }, 300); // ms per tick (adjust for speed)
+//     }, 300);
 //   },
 
-//   pauseSimulation: () => {
-//     set({ isPaused: true });
-//   },
+//   pauseSimulation: () => set({ isPaused: true }),
 
 //   resumeSimulation: () => {
 //     const { isRunning, isPaused } = get();
-//     if (isRunning && isPaused) {
-//       set({ isPaused: false });
-//     }
+//     if (isRunning && isPaused) set({ isPaused: false });
 //   },
 
 //   resetSimulation: () => {
@@ -205,54 +202,214 @@
 //     });
 //   },
 
-//   // Core step logic
-//   // Core step logic (revised)
-// stepSimulation: () => {
+// //   // Core simulation step
+// //   // ✅ Realistic Hybrid MLFQ Step Simulation
+// // stepSimulation: () => {
+// //   const state = get();
+// //   if (!state.isRunning) return;
+
+// //   const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
+// //   const prevTime = state.currentTime;
+// //   const currentTime = prevTime + 1;
+
+// //   // Remove empty queues safely
+// //   const nonEmptyQueues = queues.filter((q) => q.processes.length > 0);
+
+// //   if (nonEmptyQueues.length === 0) {
+// //     // CPU idle, but time passes
+// //     set({ currentTime, activeProcess: null });
+// //     get().updateMetrics();
+
+// //     // Stop only when nothing left to process
+// //     const allDone = queues.every((q) => q.processes.length === 0);
+// //     if (allDone && state.completedProcesses.length > 0) {
+// //       if (simulationInterval) clearInterval(simulationInterval);
+// //       set({ isRunning: false });
+// //     }
+// //     return;
+// //   }
+
+// //   // ✅ Pick topmost queue (highest priority)
+// //   const activeQueue = nonEmptyQueues[0];
+
+// //   // ✅ Sorting rules based on queue level
+// //   if (activeQueue.level === 2) {
+// //     // Q3 → Shortest Job First (SJF)
+// //     activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
+// //   } else if (activeQueue.level === 3) {
+// //     // Q4 → First Come First Serve (FCFS)
+// //     activeQueue.processes.sort((a, b) => a.arrivalTime - b.arrivalTime);
+// //   }
+
+// //   // Get the process to run
+// //   const procRef = activeQueue.processes[0];
+
+// //   // Mark response time if first time running
+// //   if (procRef.responseTime === undefined) {
+// //     procRef.responseTime = currentTime - procRef.arrivalTime;
+// //   }
+
+// //   // Execute 1ms
+// //   procRef.remainingTime -= 1;
+// //   procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+// //   procRef.state = 'running';
+
+// //   // Record Gantt chart entry
+// //   get().addGanttEntry({
+// //     processId: procRef.id,
+// //     queueLevel: activeQueue.level,
+// //     start: prevTime,
+// //     end: currentTime,
+// //   });
+
+// //   // Update waiting time for other processes
+// //   queues.forEach((q) => {
+// //     q.processes.forEach((p) => {
+// //       if (p.id !== procRef.id && p.state !== 'completed') {
+// //         p.waitingTime = (p.waitingTime || 0) + 1;
+// //       }
+// //     });
+// //   });
+
+// //   // ✅ Completion check
+// //   const completedProcesses = [...state.completedProcesses];
+// //   if (procRef.remainingTime <= 0) {
+// //     procRef.turnaroundTime = currentTime - procRef.arrivalTime;
+// //     procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
+// //     procRef.state = 'completed';
+
+// //     activeQueue.processes.shift();
+// //     completedProcesses.push(procRef);
+
+// //     set({
+// //       queues,
+// //       currentTime,
+// //       activeProcess: null,
+// //       completedProcesses,
+// //     });
+
+// //     get().updateMetrics();
+
+// //     // Stop if all queues empty
+// //     const allDone = queues.every((q) => q.processes.length === 0);
+// //     if (allDone) {
+// //       if (simulationInterval) clearInterval(simulationInterval);
+// //       set({ isRunning: false });
+// //     }
+// //     return;
+// //   }
+
+// //   // ✅ Demotion rules
+// //   if (activeQueue.level < 2) {
+// //     // For RR queues (Q1, Q2)
+// //     if (procRef.quantumUsed >= activeQueue.timeQuantum) {
+// //       procRef.quantumUsed = 0;
+// //       procRef.state = 'waiting';
+// //       activeQueue.processes.shift();
+
+// //       const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
+// //       queues[nextLevel].processes.push(procRef);
+
+// //       set({
+// //         queues,
+// //         currentTime,
+// //         activeProcess: null,
+// //       });
+
+// //       get().updateMetrics();
+// //       return;
+// //     }
+// //   } else {
+// //     // Q3 (SJF) and Q4 (FCFS) — non-preemptive
+// //     // Keep running same process until completion
+// //   }
+
+// //   // ✅ Aging promotion (periodic)
+// //   if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
+// //     for (let lvl = queues.length - 1; lvl > 0; lvl--) {
+// //       const q = queues[lvl];
+// //       const promote: Process[] = [];
+// //       const keep: Process[] = [];
+
+// //       for (const p of q.processes) {
+// //         if ((p.waitingTime || 0) >= state.agingInterval) {
+// //           promote.push({ ...p, quantumUsed: 0, state: 'waiting', waitingTime: 0 });
+// //         } else {
+// //           keep.push(p);
+// //         }
+// //       }
+
+// //       if (promote.length > 0) {
+// //         q.processes = keep;
+// //         queues[lvl - 1].processes.push(...promote);
+// //       }
+// //     }
+// //   }
+
+// //   // ✅ Commit new state
+// //   set({
+// //     queues,
+// //     currentTime,
+// //     activeProcess: procRef,
+// //   });
+
+// //   get().updateMetrics();
+// // },
+//   // Core simulation step
+//  stepSimulation: () => {
 //   const state = get();
 //   if (!state.isRunning) return;
 
 //   const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
-//   const prevTime = state.currentTime;
-//   const currentTime = prevTime + 1;
+//   let currentTime = state.currentTime + 1;
 
-//   // Pick highest-priority non-empty queue
+//   // Pick highest priority non-empty queue
 //   const activeQueue = queues.find((q) => q.processes.length > 0);
 
-//   // If no active process at all
 //   if (!activeQueue) {
-//     // Still advance time (CPU idle)
+//     // CPU idle
 //     set({ currentTime, activeProcess: null });
 //     get().updateMetrics();
-
-//     // Stop only when ALL queues empty AND all processes completed
-//     const allQueuesEmpty = queues.every((q) => q.processes.length === 0);
-//     const allDone = allQueuesEmpty && state.completedProcesses.length > 0;
-//     if (allDone) {
-//       if (simulationInterval) clearInterval(simulationInterval);
-//       set({ isRunning: false });
-//     }
 //     return;
 //   }
 
-//   const procRef = activeQueue.processes[0];
+//   let procRef: Process;
+
+//   if (activeQueue.level === 2) {
+//     // Q2: Shortest Job First (non-preemptive)
+//     activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
+//     procRef = activeQueue.processes[0];
+//   } else {
+//     // Q0/Q1: Round Robin
+//     procRef = activeQueue.processes[0];
+//   }
 
 //   // Mark first response time
 //   if (procRef.responseTime === undefined) {
 //     procRef.responseTime = currentTime - procRef.arrivalTime;
 //   }
 
-//   // Execute 1ms of CPU time
+//   // Run 1 ms
 //   procRef.remainingTime -= 1;
 //   procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
 //   procRef.state = 'running';
 
-//   // Record Gantt entry
-//   get().addGanttEntry({
-//     processId: procRef.id,
-//     queueLevel: activeQueue.level,
-//     start: prevTime,
-//     end: currentTime,
-//   });
+//   // Record Gantt chart entry
+//   const lastEntry = state.ganttChart[state.ganttChart.length - 1];
+//   if (lastEntry && lastEntry.processId === procRef.id && lastEntry.queueLevel === activeQueue.level) {
+//     // Extend last entry
+//     lastEntry.end = currentTime;
+//     set({
+//       ganttChart: [...state.ganttChart.slice(0, -1), lastEntry],
+//     });
+//   } else {
+//     get().addGanttEntry({
+//       processId: procRef.id,
+//       queueLevel: activeQueue.level,
+//       start: currentTime - 1,
+//       end: currentTime,
+//     });
+//   }
 
 //   // Update waiting time for all other processes
 //   queues.forEach((q) => {
@@ -263,7 +420,7 @@
 //     });
 //   });
 
-//   // ✅ Completion check
+//   // Check for completion
 //   const completedProcesses = [...state.completedProcesses];
 //   if (procRef.remainingTime <= 0) {
 //     procRef.turnaroundTime = currentTime - procRef.arrivalTime;
@@ -281,27 +438,16 @@
 //     });
 
 //     get().updateMetrics();
-
-//     // Only stop if EVERYTHING is done
-//     const allDone = queues.every((q) => q.processes.length === 0);
-//     if (allDone) {
-//       if (simulationInterval) clearInterval(simulationInterval);
-//       set({ isRunning: false });
-//     }
 //     return;
 //   }
 
-//   // ✅ Quantum expiry → demote if possible
-//   if (procRef.quantumUsed >= activeQueue.timeQuantum) {
+//   // Demotion rules for RR queues only
+//   if (activeQueue.level < 2 && procRef.quantumUsed >= activeQueue.timeQuantum) {
 //     procRef.quantumUsed = 0;
 //     procRef.state = 'waiting';
 //     activeQueue.processes.shift();
-
 //     const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
 //     queues[nextLevel].processes.push(procRef);
-
-//     // Reset waiting time aging counter
-//     procRef.waitingTime = 0;
 
 //     set({
 //       queues,
@@ -313,10 +459,7 @@
 //     return;
 //   }
 
-//   // ✅ Otherwise continue running at head
-//   activeQueue.processes[0] = procRef;
-
-//   // ✅ Aging: promote periodically
+//   // Aging promotion
 //   if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
 //     for (let lvl = queues.length - 1; lvl > 0; lvl--) {
 //       const q = queues[lvl];
@@ -338,7 +481,7 @@
 //     }
 //   }
 
-//   // Commit updated state for this tick
+//   // Commit state
 //   set({
 //     queues,
 //     currentTime,
@@ -349,19 +492,18 @@
 // },
 
 
-//   // Metrics: include both completed and in-queues for live readings
+//   // Metrics
 //   updateMetrics: () => {
 //     const state = get();
 //     const allInQueues = state.queues.flatMap((q) => q.processes);
-//     const allProcesses = [...state.completedProcesses, ...allInQueues];
-//     const metrics = calculateMetrics(allProcesses, state.completedProcesses, state.currentTime);
-//     set({ metrics: { ...metrics } });
+//     const all = [...state.completedProcesses, ...allInQueues];
+//     const metrics = calculateMetrics(all, state.completedProcesses, state.currentTime);
+//     set({ metrics });
 //   },
 
 //   addGanttEntry: (entry) =>
 //     set((state) => ({ ganttChart: [...state.ganttChart, entry] })),
 // }));
-// src/store/simulationStore.ts
 import { create } from 'zustand';
 import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
 
@@ -398,10 +540,12 @@ interface SimulationStore extends SimulationState {
   addGanttEntry: (entry: GanttEntry) => void;
 }
 
+// Fixed: Proper 4-queue setup with correct scheduling policies
 const initialQueues: Queue[] = [
-  { level: 0, timeQuantum: 4, processes: [] },
-  { level: 1, timeQuantum: 8, processes: [] },
-  { level: 2, timeQuantum: 16, processes: [] },
+  { level: 0, timeQuantum: 4, processes: [] },  // Q1: Round Robin
+  { level: 1, timeQuantum: 8, processes: [] },  // Q2: Round Robin  
+  { level: 2, timeQuantum: 0, processes: [] },  // Q3: SJF (no quantum needed)
+  { level: 3, timeQuantum: 0, processes: [] },  // Q4: FCFS (no quantum needed)
 ];
 
 const calculateMetrics = (all: Process[], completed: Process[], currentTime: number) => {
@@ -440,7 +584,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   completedProcesses: [],
   ganttChart: [],
   activeProcess: null,
-  numQueues: 3,
+  numQueues: 4, // Fixed: Match actual queue count
   agingInterval: 10,
   metrics: {
     avgTurnaroundTime: 0,
@@ -454,6 +598,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   setQueues: (queues) => set({ queues }),
 
   addProcess: (data) => {
+    // Input validation
+    if (data.burstTime <= 0) {
+      console.error('Burst time must be positive');
+      return;
+    }
+
     const id = `P${Date.now()}`;
     const newProcess: Process = {
       ...data,
@@ -501,9 +651,16 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const newQueues: Queue[] = [];
       for (let i = 0; i < num; i++) {
         const existing = state.queues[i];
+        // Fixed: Better default time quantums based on queue level
+        let defaultQuantum = 0;
+        if (i < 2) { // RR queues
+          defaultQuantum = Math.pow(2, i + 2); // 4, 8, etc.
+        }
+        // SJF and FCFS queues don't need time quantum
+        
         newQueues.push({
           level: i,
-          timeQuantum: existing?.timeQuantum ?? Math.pow(2, i + 2),
+          timeQuantum: existing?.timeQuantum ?? defaultQuantum,
           processes: existing?.processes ? [...existing.processes] : [],
         });
       }
@@ -565,295 +722,190 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
-//   // Core simulation step
-//   // ✅ Realistic Hybrid MLFQ Step Simulation
-// stepSimulation: () => {
-//   const state = get();
-//   if (!state.isRunning) return;
+  // ✅ CORRECTED Core MLFQ Simulation Step
+  stepSimulation: () => {
+    const state = get();
+    if (!state.isRunning || state.isPaused) return;
 
-//   const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
-//   const prevTime = state.currentTime;
-//   const currentTime = prevTime + 1;
+    // Create deep copies of queues
+    const queues: Queue[] = state.queues.map((q) => ({
+      ...q,
+      processes: q.processes.map(p => ({ ...p }))
+    }));
+    
+    const currentTime = state.currentTime + 1;
+    const completedProcesses = [...state.completedProcesses];
+    
+    // Reset previous active process state if needed
+    const previousActive = state.activeProcess;
+    if (previousActive) {
+      queues.forEach(q => {
+        q.processes.forEach(p => {
+          if (p.id === previousActive.id && p.state === 'running' && p.remainingTime > 0) {
+            p.state = 'waiting';
+          }
+        });
+      });
+    }
 
-//   // Remove empty queues safely
-//   const nonEmptyQueues = queues.filter((q) => q.processes.length > 0);
+    // Find highest priority non-empty queue
+    const activeQueue = queues.find(q => q.processes.length > 0);
+    
+    if (!activeQueue) {
+      // CPU idle - no processes to run
+      set({ 
+        currentTime, 
+        activeProcess: null,
+        queues 
+      });
+      get().updateMetrics();
+      
+      // Stop simulation if everything is done
+      if (completedProcesses.length > 0) {
+        if (simulationInterval) {
+          clearInterval(simulationInterval);
+          simulationInterval = null;
+        }
+        set({ isRunning: false });
+      }
+      return;
+    }
 
-//   if (nonEmptyQueues.length === 0) {
-//     // CPU idle, but time passes
-//     set({ currentTime, activeProcess: null });
-//     get().updateMetrics();
+    let procRef: Process;
 
-//     // Stop only when nothing left to process
-//     const allDone = queues.every((q) => q.processes.length === 0);
-//     if (allDone && state.completedProcesses.length > 0) {
-//       if (simulationInterval) clearInterval(simulationInterval);
-//       set({ isRunning: false });
-//     }
-//     return;
-//   }
+    // ✅ Apply correct scheduling policies based on queue level
+    switch (activeQueue.level) {
+      case 0: // Q1: Round Robin (highest priority)
+      case 1: // Q2: Round Robin
+        procRef = activeQueue.processes[0]; // Take first in queue (FIFO for RR)
+        break;
+        
+      case 2: // Q3: Shortest Job First
+        // Sort by remaining time (SJF)
+        activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
+        procRef = activeQueue.processes[0];
+        break;
+        
+      case 3: // Q4: First Come First Serve (lowest priority)
+        // Sort by arrival time (FCFS)
+        activeQueue.processes.sort((a, b) => a.arrivalTime - b.arrivalTime);
+        procRef = activeQueue.processes[0];
+        break;
+        
+      default:
+        procRef = activeQueue.processes[0];
+    }
 
-//   // ✅ Pick topmost queue (highest priority)
-//   const activeQueue = nonEmptyQueues[0];
+    // Mark response time if this is the first time running
+    if (procRef.responseTime === undefined) {
+      procRef.responseTime = currentTime - procRef.arrivalTime;
+    }
 
-//   // ✅ Sorting rules based on queue level
-//   if (activeQueue.level === 2) {
-//     // Q3 → Shortest Job First (SJF)
-//     activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
-//   } else if (activeQueue.level === 3) {
-//     // Q4 → First Come First Serve (FCFS)
-//     activeQueue.processes.sort((a, b) => a.arrivalTime - b.arrivalTime);
-//   }
+    // Execute 1 time unit
+    procRef.remainingTime -= 1;
+    procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+    procRef.state = 'running';
 
-//   // Get the process to run
-//   const procRef = activeQueue.processes[0];
-
-//   // Mark response time if first time running
-//   if (procRef.responseTime === undefined) {
-//     procRef.responseTime = currentTime - procRef.arrivalTime;
-//   }
-
-//   // Execute 1ms
-//   procRef.remainingTime -= 1;
-//   procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
-//   procRef.state = 'running';
-
-//   // Record Gantt chart entry
-//   get().addGanttEntry({
-//     processId: procRef.id,
-//     queueLevel: activeQueue.level,
-//     start: prevTime,
-//     end: currentTime,
-//   });
-
-//   // Update waiting time for other processes
-//   queues.forEach((q) => {
-//     q.processes.forEach((p) => {
-//       if (p.id !== procRef.id && p.state !== 'completed') {
-//         p.waitingTime = (p.waitingTime || 0) + 1;
-//       }
-//     });
-//   });
-
-//   // ✅ Completion check
-//   const completedProcesses = [...state.completedProcesses];
-//   if (procRef.remainingTime <= 0) {
-//     procRef.turnaroundTime = currentTime - procRef.arrivalTime;
-//     procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
-//     procRef.state = 'completed';
-
-//     activeQueue.processes.shift();
-//     completedProcesses.push(procRef);
-
-//     set({
-//       queues,
-//       currentTime,
-//       activeProcess: null,
-//       completedProcesses,
-//     });
-
-//     get().updateMetrics();
-
-//     // Stop if all queues empty
-//     const allDone = queues.every((q) => q.processes.length === 0);
-//     if (allDone) {
-//       if (simulationInterval) clearInterval(simulationInterval);
-//       set({ isRunning: false });
-//     }
-//     return;
-//   }
-
-//   // ✅ Demotion rules
-//   if (activeQueue.level < 2) {
-//     // For RR queues (Q1, Q2)
-//     if (procRef.quantumUsed >= activeQueue.timeQuantum) {
-//       procRef.quantumUsed = 0;
-//       procRef.state = 'waiting';
-//       activeQueue.processes.shift();
-
-//       const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
-//       queues[nextLevel].processes.push(procRef);
-
-//       set({
-//         queues,
-//         currentTime,
-//         activeProcess: null,
-//       });
-
-//       get().updateMetrics();
-//       return;
-//     }
-//   } else {
-//     // Q3 (SJF) and Q4 (FCFS) — non-preemptive
-//     // Keep running same process until completion
-//   }
-
-//   // ✅ Aging promotion (periodic)
-//   if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
-//     for (let lvl = queues.length - 1; lvl > 0; lvl--) {
-//       const q = queues[lvl];
-//       const promote: Process[] = [];
-//       const keep: Process[] = [];
-
-//       for (const p of q.processes) {
-//         if ((p.waitingTime || 0) >= state.agingInterval) {
-//           promote.push({ ...p, quantumUsed: 0, state: 'waiting', waitingTime: 0 });
-//         } else {
-//           keep.push(p);
-//         }
-//       }
-
-//       if (promote.length > 0) {
-//         q.processes = keep;
-//         queues[lvl - 1].processes.push(...promote);
-//       }
-//     }
-//   }
-
-//   // ✅ Commit new state
-//   set({
-//     queues,
-//     currentTime,
-//     activeProcess: procRef,
-//   });
-
-//   get().updateMetrics();
-// },
-  // Core simulation step
- stepSimulation: () => {
-  const state = get();
-  if (!state.isRunning) return;
-
-  const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
-  let currentTime = state.currentTime + 1;
-
-  // Pick highest priority non-empty queue
-  const activeQueue = queues.find((q) => q.processes.length > 0);
-
-  if (!activeQueue) {
-    // CPU idle
-    set({ currentTime, activeProcess: null });
-    get().updateMetrics();
-    return;
-  }
-
-  let procRef: Process;
-
-  if (activeQueue.level === 2) {
-    // Q2: Shortest Job First (non-preemptive)
-    activeQueue.processes.sort((a, b) => a.remainingTime - b.remainingTime);
-    procRef = activeQueue.processes[0];
-  } else {
-    // Q0/Q1: Round Robin
-    procRef = activeQueue.processes[0];
-  }
-
-  // Mark first response time
-  if (procRef.responseTime === undefined) {
-    procRef.responseTime = currentTime - procRef.arrivalTime;
-  }
-
-  // Run 1 ms
-  procRef.remainingTime -= 1;
-  procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
-  procRef.state = 'running';
-
-  // Record Gantt chart entry
-  const lastEntry = state.ganttChart[state.ganttChart.length - 1];
-  if (lastEntry && lastEntry.processId === procRef.id && lastEntry.queueLevel === activeQueue.level) {
-    // Extend last entry
-    lastEntry.end = currentTime;
-    set({
-      ganttChart: [...state.ganttChart.slice(0, -1), lastEntry],
-    });
-  } else {
-    get().addGanttEntry({
+    // Create new Gantt chart entry (don't extend previous entries)
+    const ganttEntry: GanttEntry = {
       processId: procRef.id,
       queueLevel: activeQueue.level,
       start: currentTime - 1,
       end: currentTime,
-    });
-  }
+    };
+    get().addGanttEntry(ganttEntry);
 
-  // Update waiting time for all other processes
-  queues.forEach((q) => {
-    q.processes.forEach((p) => {
-      if (p.id !== procRef.id && p.state !== 'completed') {
-        p.waitingTime = (p.waitingTime || 0) + 1;
-      }
-    });
-  });
-
-  // Check for completion
-  const completedProcesses = [...state.completedProcesses];
-  if (procRef.remainingTime <= 0) {
-    procRef.turnaroundTime = currentTime - procRef.arrivalTime;
-    procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
-    procRef.state = 'completed';
-
-    activeQueue.processes.shift();
-    completedProcesses.push(procRef);
-
-    set({
-      queues,
-      currentTime,
-      activeProcess: null,
-      completedProcesses,
+    // Update waiting time for all other ready processes
+    queues.forEach(q => {
+      q.processes.forEach(p => {
+        if (p.id !== procRef.id && p.state !== 'completed' && p.remainingTime > 0) {
+          p.waitingTime = (p.waitingTime || 0) + 1;
+        }
+      });
     });
 
-    get().updateMetrics();
-    return;
-  }
+    // ✅ Check for process completion
+    if (procRef.remainingTime <= 0) {
+      procRef.turnaroundTime = currentTime - procRef.arrivalTime;
+      procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
+      procRef.state = 'completed';
+      procRef.completionTime = currentTime;
 
-  // Demotion rules for RR queues only
-  if (activeQueue.level < 2 && procRef.quantumUsed >= activeQueue.timeQuantum) {
-    procRef.quantumUsed = 0;
-    procRef.state = 'waiting';
-    activeQueue.processes.shift();
-    const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
-    queues[nextLevel].processes.push(procRef);
+      // Remove from active queue and add to completed
+      activeQueue.processes = activeQueue.processes.filter(p => p.id !== procRef.id);
+      completedProcesses.push(procRef);
 
-    set({
-      queues,
-      currentTime,
-      activeProcess: null,
-    });
+      set({
+        queues,
+        currentTime,
+        activeProcess: null,
+        completedProcesses,
+      });
 
-    get().updateMetrics();
-    return;
-  }
+      get().updateMetrics();
+      return;
+    }
 
-  // Aging promotion
-  if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
-    for (let lvl = queues.length - 1; lvl > 0; lvl--) {
-      const q = queues[lvl];
-      const promote: Process[] = [];
-      const keep: Process[] = [];
+    // ✅ Demotion rules for Round Robin queues only
+    if (activeQueue.level < 2 && procRef.quantumUsed >= activeQueue.timeQuantum) {
+      procRef.quantumUsed = 0;
+      procRef.state = 'waiting';
+      
+      // Remove from current queue
+      activeQueue.processes = activeQueue.processes.filter(p => p.id !== procRef.id);
+      
+      // Move to next lower queue (demote)
+      const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
+      queues[nextLevel].processes.push(procRef);
 
-      for (const p of q.processes) {
-        if ((p.waitingTime || 0) >= state.agingInterval) {
-          promote.push({ ...p, quantumUsed: 0, state: 'waiting', waitingTime: 0 });
-        } else {
-          keep.push(p);
+      set({
+        queues,
+        currentTime,
+        activeProcess: null,
+      });
+
+      get().updateMetrics();
+      return;
+    }
+
+    // ✅ Fixed Aging Promotion (moves starving processes to higher queues)
+    if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
+      for (let lvl = queues.length - 1; lvl > 0; lvl--) {
+        const q = queues[lvl];
+        const promote: Process[] = [];
+        const keep: Process[] = [];
+
+        for (const p of q.processes) {
+          // Don't promote the currently running process
+          if (p.id !== procRef?.id && (p.waitingTime || 0) >= state.agingInterval) {
+            promote.push({ 
+              ...p, 
+              quantumUsed: 0, 
+              state: 'waiting'
+              // Note: Don't reset waitingTime to maintain aging counter
+            });
+          } else {
+            keep.push(p);
+          }
+        }
+
+        if (promote.length > 0) {
+          q.processes = keep;
+          // Promote to next higher queue
+          queues[lvl - 1].processes.push(...promote);
         }
       }
-
-      if (promote.length > 0) {
-        q.processes = keep;
-        queues[lvl - 1].processes.push(...promote);
-      }
     }
-  }
 
-  // Commit state
-  set({
-    queues,
-    currentTime,
-    activeProcess: procRef,
-  });
+    // ✅ Commit final state for continuing execution
+    set({
+      queues,
+      currentTime,
+      activeProcess: procRef,
+    });
 
-  get().updateMetrics();
-},
-
+    get().updateMetrics();
+  },
 
   // Metrics
   updateMetrics: () => {
