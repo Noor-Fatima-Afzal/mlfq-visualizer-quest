@@ -1,16 +1,16 @@
-import { Play, Pause, RotateCcw, SkipForward } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useSimulationStore } from '@/store/simulationStore';
+import { Play, Pause, RotateCcw, SkipForward } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useSimulationStore } from "@/store/simulationStore";
 
-export const SimulationControls = () => {
-  const { 
-    isRunning, 
+const SimulationControls: React.FC = () => {
+  const {
+    isRunning,
     isPaused,
-    startSimulation, 
-    pauseSimulation, 
-    resumeSimulation, 
+    startSimulation,
+    pauseSimulation,
+    resumeSimulation,
     resetSimulation,
-    stepSimulation 
+    stepSimulation,
   } = useSimulationStore();
 
   const handlePlayPause = () => {
@@ -25,11 +25,7 @@ export const SimulationControls = () => {
 
   return (
     <div className="flex items-center gap-3">
-      <Button
-        onClick={handlePlayPause}
-        size="lg"
-        className="gap-2"
-      >
+      <Button onClick={handlePlayPause} size="lg" className="gap-2">
         {isRunning && !isPaused ? (
           <>
             <Pause className="w-5 h-5" />
@@ -38,7 +34,7 @@ export const SimulationControls = () => {
         ) : (
           <>
             <Play className="w-5 h-5" />
-            {isRunning ? 'Resume' : 'Start'}
+            {isRunning ? "Resume" : "Start"}
           </>
         )}
       </Button>
@@ -66,3 +62,5 @@ export const SimulationControls = () => {
     </div>
   );
 };
+
+export default SimulationControls;
