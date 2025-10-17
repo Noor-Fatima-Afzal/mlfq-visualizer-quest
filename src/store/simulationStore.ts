@@ -1,3 +1,4 @@
+// src/store/simulationStore.ts
 import { create } from 'zustand';
 import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
 
@@ -15,6 +16,7 @@ interface SimulationStore extends SimulationState {
       | 'turnaroundTime'
       | 'quantumUsed'
       | 'state'
+      | 'arrivalTime'
       | 'responseTime'
     >
   ) => void;
@@ -40,8 +42,8 @@ const initialQueues: Queue[] = [
   { level: 2, timeQuantum: 16, processes: [] },
 ];
 
-const calculateMetrics = (completed: Process[], currentTime: number) => {
-  if (completed.length === 0)
+const calculateMetrics = (all: Process[], completed: Process[], currentTime: number) => {
+  if (all.length === 0) {
     return {
       avgTurnaroundTime: 0,
       avgWaitingTime: 0,
@@ -49,20 +51,23 @@ const calculateMetrics = (completed: Process[], currentTime: number) => {
       throughput: 0,
       cpuUtilization: 0,
     };
+  }
 
-  const totalTurnaround = completed.reduce((s, p) => s + p.turnaroundTime, 0);
-  const totalWaiting = completed.reduce((s, p) => s + p.waitingTime, 0);
-  const totalResponse = completed.reduce((s, p) => s + (p.responseTime || 0), 0);
-  const totalBurst = completed.reduce((s, p) => s + p.burstTime, 0);
+  const totalTurnaround = completed.reduce((sum, p) => sum + (p.turnaroundTime || 0), 0);
+  const totalWaiting = completed.reduce((sum, p) => sum + (p.waitingTime || 0), 0);
+  const totalResponse = completed.reduce((sum, p) => sum + (p.responseTime || 0), 0);
+  const totalBurst = all.reduce((sum, p) => sum + (p.burstTime || 0), 0);
 
   return {
-    avgTurnaroundTime: totalTurnaround / completed.length,
-    avgWaitingTime: totalWaiting / completed.length,
-    avgResponseTime: totalResponse / completed.length,
-    throughput: completed.length / (currentTime || 1),
+    avgTurnaroundTime: completed.length > 0 ? totalTurnaround / completed.length : 0,
+    avgWaitingTime: completed.length > 0 ? totalWaiting / completed.length : 0,
+    avgResponseTime: completed.length > 0 ? totalResponse / completed.length : 0,
+    throughput: completed.length / Math.max(currentTime, 1),
     cpuUtilization: currentTime > 0 ? (totalBurst / currentTime) * 100 : 0,
   };
 };
+
+let simulationInterval: NodeJS.Timeout | null = null;
 
 export const useSimulationStore = create<SimulationStore>((set, get) => ({
   queues: initialQueues,
@@ -82,6 +87,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     cpuUtilization: 0,
   },
 
+  // Basic setters
   setQueues: (queues) => set({ queues }),
 
   addProcess: (data) => {
@@ -89,6 +95,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const newProcess: Process = {
       ...data,
       id,
+      arrivalTime: get().currentTime,
       remainingTime: data.burstTime,
       waitingTime: 0,
       turnaroundTime: 0,
@@ -98,8 +105,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     };
 
     set((state) => {
-      const updated = [...state.queues];
-      updated[0].processes.push(newProcess);
+      const updated = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
+      // push to highest priority queue (level 0)
+      if (updated[0]) updated[0].processes.push(newProcess);
+      else updated[0] = { level: 0, timeQuantum: 4, processes: [newProcess] };
+
       return { queues: updated };
     });
   },
@@ -110,6 +120,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         ...q,
         processes: q.processes.filter((p) => p.id !== id),
       })),
+      completedProcesses: state.completedProcesses.filter((p) => p.id !== id),
     }));
   },
 
@@ -117,10 +128,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     set((state) => ({
       queues: state.queues.map((q) => ({
         ...q,
-        processes: q.processes.map((p) =>
-          p.id === id ? { ...p, ...updates } : p
-        ),
+        processes: q.processes.map((p) => (p.id === id ? { ...p, ...updates } : p)),
       })),
+      completedProcesses: state.completedProcesses.map((p) => (p.id === id ? { ...p, ...updates } : p)),
     }));
   },
 
@@ -128,10 +138,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     set((state) => {
       const newQueues: Queue[] = [];
       for (let i = 0; i < num; i++) {
+        const existing = state.queues[i];
         newQueues.push({
           level: i,
-          timeQuantum: state.queues[i]?.timeQuantum || Math.pow(2, i + 2),
-          processes: state.queues[i]?.processes || [],
+          timeQuantum: existing?.timeQuantum ?? Math.pow(2, i + 2),
+          processes: existing?.processes ? [...existing.processes] : [],
         });
       }
       return { numQueues: num, queues: newQueues };
@@ -139,18 +150,43 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   setTimeQuantum: (level, quantum) =>
     set((state) => ({
-      queues: state.queues.map((q) =>
-        q.level === level ? { ...q, timeQuantum: quantum } : q
-      ),
+      queues: state.queues.map((q) => (q.level === level ? { ...q, timeQuantum: quantum } : q)),
     })),
 
   setAgingInterval: (interval) => set({ agingInterval: interval }),
 
-  startSimulation: () => set({ isRunning: true, isPaused: false }),
-  pauseSimulation: () => set({ isPaused: true }),
-  resumeSimulation: () => set({ isPaused: false }),
+  // Simulation control: start / pause / resume / reset
+  startSimulation: () => {
+    const { isRunning } = get();
+    if (isRunning) return;
+
+    set({ isRunning: true, isPaused: false });
+
+    if (simulationInterval) clearInterval(simulationInterval);
+
+    simulationInterval = setInterval(() => {
+      const { isRunning: running, isPaused } = get();
+      if (!running || isPaused) return;
+      get().stepSimulation();
+    }, 300); // ms per tick (adjust for speed)
+  },
+
+  pauseSimulation: () => {
+    set({ isPaused: true });
+  },
+
+  resumeSimulation: () => {
+    const { isRunning, isPaused } = get();
+    if (isRunning && isPaused) {
+      set({ isPaused: false });
+    }
+  },
 
   resetSimulation: () => {
+    if (simulationInterval) {
+      clearInterval(simulationInterval);
+      simulationInterval = null;
+    }
     set({
       queues: initialQueues.map((q) => ({ ...q, processes: [] })),
       currentTime: 0,
@@ -169,78 +205,158 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
+  // Core step logic
   stepSimulation: () => {
     const state = get();
-    if (state.isPaused || !state.isRunning) return;
+    // even if UI calls step manually, allow stepping when running or paused
+    // but if simulation is stopped entirely, do nothing
+    if (!state.isRunning) return;
 
-    const queues = [...state.queues];
-    const active =
-      state.activeProcess ||
-      queues.find((q) => q.processes.length > 0)?.processes[0] ||
-      null;
+    // shallow-copy queues and processes to avoid accidental mutation issues
+    const queues: Queue[] = state.queues.map((q) => ({ ...q, processes: [...q.processes] }));
+    const prevTime = state.currentTime;
+    const currentTime = prevTime + 1;
 
-    if (!active) return;
+    // Pick highest-priority non-empty queue
+    const activeQueue = queues.find((q) => q.processes.length > 0);
 
-    const queueLevel = queues.findIndex((q) =>
-      q.processes.some((p) => p.id === active.id)
-    );
-    const currentQueue = queues[queueLevel];
-
-    if (active.responseTime === undefined) {
-      active.responseTime = state.currentTime - active.arrivalTime;
+    if (!activeQueue) {
+      // no process to run this tick
+      set({ currentTime, activeProcess: null });
+      get().updateMetrics();
+      // stop if nothing else and simulation was running — optionally auto-stop
+      const allQueuesEmpty = queues.every((q) => q.processes.length === 0);
+      if (allQueuesEmpty) {
+        // auto-stop
+        if (simulationInterval) {
+          clearInterval(simulationInterval);
+          simulationInterval = null;
+        }
+        set({ isRunning: false });
+      }
+      return;
     }
 
-    // Execute 1ms of CPU time
-    active.remainingTime -= 1;
-    active.quantumUsed += 1;
+    // operate on the actual head process object inside queue
+    const procRef = activeQueue.processes[0];
 
-    // Record in Gantt chart
+    // If response time not set, set it now (first time scheduled)
+    if (procRef.responseTime === undefined) {
+      procRef.responseTime = currentTime - procRef.arrivalTime;
+    }
+
+    // Execute 1ms
+    procRef.remainingTime -= 1;
+    procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+    procRef.state = 'running';
+
+    // Add Gantt entry for this tick
     get().addGanttEntry({
-      processId: active.id,
-      start: state.currentTime,
-      end: state.currentTime + 1,
-      queueLevel,
+      processId: procRef.id,
+      queueLevel: activeQueue.level,
+      start: prevTime,
+      end: currentTime,
     });
 
-    let completed = [...state.completedProcesses];
-    let newActive: Process | null = active;
+    // Increase waiting time for other processes
+    queues.forEach((q) => {
+      q.processes.forEach((p) => {
+        if (p.id !== procRef.id && p.state !== 'completed') {
+          p.waitingTime = (p.waitingTime || 0) + 1;
+        }
+      });
+    });
 
-    if (active.remainingTime <= 0) {
-      active.turnaroundTime = state.currentTime + 1 - active.arrivalTime;
-      completed = [...completed, active];
-      queues[queueLevel].processes = queues[queueLevel].processes.filter(
-        (p) => p.id !== active.id
-      );
-      newActive = null;
-    } else if (active.quantumUsed >= currentQueue.timeQuantum) {
-      // demote process
-      queues[queueLevel].processes = queues[queueLevel].processes.filter(
-        (p) => p.id !== active.id
-      );
-      const nextLevel = Math.min(queueLevel + 1, queues.length - 1);
-      queues[nextLevel].processes.push({ ...active, quantumUsed: 0 });
-      newActive = null;
+    // Completion check
+    const completedProcesses = [...state.completedProcesses];
+    if (procRef.remainingTime <= 0) {
+      procRef.turnaroundTime = currentTime - (procRef.arrivalTime ?? 0);
+      procRef.waitingTime = procRef.turnaroundTime - procRef.burstTime;
+      procRef.state = 'completed';
+
+      // remove from queue
+      activeQueue.processes.shift();
+      completedProcesses.push(procRef);
+
+      set({
+        queues,
+        currentTime,
+        activeProcess: null,
+        completedProcesses,
+      });
+
+      get().updateMetrics();
+
+      // if nothing left, stop the loop automatically
+      const anyLeft = queues.some((q) => q.processes.length > 0);
+      if (!anyLeft) {
+        if (simulationInterval) {
+          clearInterval(simulationInterval);
+          simulationInterval = null;
+        }
+        set({ isRunning: false });
+      }
+      return;
     }
 
-    const nextActive =
-      newActive ||
-      queues.find((q) => q.processes.length > 0)?.processes[0] ||
-      null;
+    // Quantum expiry -> demote
+    if (procRef.quantumUsed >= activeQueue.timeQuantum) {
+      procRef.quantumUsed = 0;
+      activeQueue.processes.shift();
+      const nextLevel = Math.min(activeQueue.level + 1, queues.length - 1);
+      // push to tail of next level
+      queues[nextLevel].processes.push({ ...procRef, state: 'waiting' });
+      // activeProcess becomes null here (will pick next)
+      set({
+        queues,
+        currentTime,
+        activeProcess: null,
+      });
+      get().updateMetrics();
+      return;
+    }
 
+    // Otherwise, keep process at head with updated remaining/quantum
+    activeQueue.processes[0] = procRef;
+
+    // Aging: promote from lower queues periodically (optional, simple approach)
+    if (state.agingInterval > 0 && currentTime % state.agingInterval === 0) {
+      for (let lvl = queues.length - 1; lvl > 0; lvl--) {
+        const q = queues[lvl];
+        const promote: Process[] = [];
+        const keep: Process[] = [];
+        for (const p of q.processes) {
+          // simple aging condition: waitingTime >= agingInterval
+          if ((p.waitingTime || 0) >= state.agingInterval) {
+            promote.push({ ...p, quantumUsed: 0, state: 'waiting' });
+          } else {
+            keep.push(p);
+          }
+        }
+        if (promote.length > 0) {
+          q.processes = keep;
+          queues[lvl - 1].processes.push(...promote);
+        }
+      }
+    }
+
+    // commit updates
     set({
       queues,
-      currentTime: state.currentTime + 1,
-      activeProcess: nextActive,
-      completedProcesses: completed,
+      currentTime,
+      activeProcess: procRef,
     });
 
     get().updateMetrics();
   },
 
+  // Metrics: include both completed and in-queues for live readings
   updateMetrics: () => {
-    const { completedProcesses, currentTime } = get();
-    const metrics = calculateMetrics(completedProcesses, currentTime);
-    set({ metrics });
+    const state = get();
+    const allInQueues = state.queues.flatMap((q) => q.processes);
+    const allProcesses = [...state.completedProcesses, ...allInQueues];
+    const metrics = calculateMetrics(allProcesses, state.completedProcesses, state.currentTime);
+    set({ metrics: { ...metrics } });
   },
 
   addGanttEntry: (entry) =>
