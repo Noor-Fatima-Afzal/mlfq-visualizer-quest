@@ -662,8 +662,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       return;
     }
     
-    // ✅ PRIORITY BOOST: Only apply AFTER we know there are processes
-    // Apply boost BEFORE selecting which process to run
+    // ✅ PRIORITY BOOST: TEMPORARILY DISABLED FOR DEBUGGING
+    // Testing if boost is causing the gaps
+    /*
     if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
       // Move all processes from lower queues to Q1
       for (let i = 1; i < queues.length; i++) {
@@ -689,6 +690,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         return;
       }
     }
+    */
 
     const activeQueue = queues[activeQueueIndex];
     
@@ -757,8 +759,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       activeQueue.processes.push(procRef); // Add to back of queue
     }
 
-    // ✅ FIXED: Aging Promotion - only promote from lower queues when appropriate
-    // Check aging only at aging interval boundaries to avoid constant promotions
+    // ✅ FIXED: Aging Promotion - DISABLED FOR NOW TO DEBUG
+    // The aging mechanism seems to be causing the gaps
+    // TODO: Re-enable with proper logic after confirming base simulation works
+    
+    // Aging disabled - commented out
+    /*
     if (state.agingInterval > 0 && currentTime > 0 && currentTime % state.agingInterval === 0) {
       for (let lvl = queues.length - 1; lvl > 0; lvl--) {
         const q = queues[lvl];
@@ -766,13 +772,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         const keep: Process[] = [];
 
         for (const p of q.processes) {
-          // Promote if waiting time significantly exceeds aging threshold
-          // Use 2x aging interval to avoid premature promotions
           if ((p.waitingTime || 0) >= state.agingInterval * 2) {
             promote.push({ 
               ...p, 
-              quantumUsed: 0, // Reset quantum when promoting
-              waitingTime: 0, // Reset waiting time after promotion
+              quantumUsed: 0,
+              waitingTime: 0,
               state: 'waiting'
             });
           } else {
@@ -786,6 +790,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         }
       }
     }
+    */
 
     // ✅ Commit final state
     set({
