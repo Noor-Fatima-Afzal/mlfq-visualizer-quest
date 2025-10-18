@@ -509,6 +509,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       quantumUsed: 0,
       responseTime: undefined,
       state: 'waiting',
+      burstTime: data.burstTime, // Explicitly preserve original burst time
     };
 
     console.log('Adding process:', { 
@@ -672,12 +673,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const activeQueue = queues[activeQueueIndex];
       const procRef = activeQueue.processes.shift()!;
       
-      if (currentTime % 5 === 0) {
-        console.log(`Time ${currentTime}: Running ${procRef.id} from Q${activeQueueIndex}, remaining: ${procRef.remainingTime}`);
-      }
-
+      // FIXED: Set response time when process first starts (before any execution)
       if (procRef.responseTime === undefined) {
         procRef.responseTime = currentTime - procRef.arrivalTime;
+        console.log(`Process ${procRef.id} first response at time ${currentTime}, arrival was ${procRef.arrivalTime}, response time: ${procRef.responseTime}`);
+      }
+      
+      if (currentTime % 5 === 0) {
+        console.log(`Time ${currentTime}: Running ${procRef.id} from Q${activeQueueIndex}, remaining: ${procRef.remainingTime}`);
       }
 
       procRef.remainingTime -= 1;
@@ -698,13 +701,17 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         procRef.turnaroundTime = currentTime + 1 - procRef.arrivalTime;
         procRef.state = 'completed';
         
-        // Calculate final waiting time: turnaround - burst
-        const originalBurstTime = procRef.turnaroundTime - procRef.waitingTime;
-        procRef.waitingTime = procRef.turnaroundTime - originalBurstTime;
+        // FIXED: Waiting time = Turnaround time - Burst time
+        const burstTime = procRef.burstTime || (procRef.turnaroundTime - procRef.waitingTime);
+        procRef.waitingTime = procRef.turnaroundTime - burstTime;
         
         completedProcesses.push(procRef);
         
-        console.log(`Time ${currentTime + 1}: Process ${procRef.id} COMPLETED - Turnaround: ${procRef.turnaroundTime}, Waiting: ${procRef.waitingTime}, Response: ${procRef.responseTime}`);
+        console.log(`Time ${currentTime + 1}: Process ${procRef.id} COMPLETED`);
+        console.log(`  - Burst Time: ${burstTime}`);
+        console.log(`  - Turnaround: ${procRef.turnaroundTime}`);
+        console.log(`  - Waiting: ${procRef.waitingTime}`);
+        console.log(`  - Response: ${procRef.responseTime}`);
         
         // Increment waiting time for remaining processes
         queues.forEach(q => {
