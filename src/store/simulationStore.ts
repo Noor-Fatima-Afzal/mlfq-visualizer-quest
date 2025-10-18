@@ -503,8 +503,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const state = get();
     const id = `P${Date.now()}`;
     
-    // Use the provided arrival time, or current time if simulation is running
-    const arrivalTime = data.arrivalTime ?? state.currentTime;
+    // CRITICAL: Use the provided arrival time, default to 0 if not provided
+    // This ensures processes added before simulation have arrival time 0
+    const arrivalTime = data.arrivalTime ?? 0;
     
     const newProcess: Process = {
       ...data,
@@ -517,6 +518,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       responseTime: undefined,
       state: 'waiting',
     };
+
+    console.log('Adding process:', { 
+      id, 
+      arrivalTime, 
+      burstTime: data.burstTime,
+      currentTime: state.currentTime 
+    });
 
     set((state) => {
       const updated = [...state.queues];
@@ -631,25 +639,21 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const completedProcesses = [...state.completedProcesses];
     
     // ✅ PRIORITY BOOST: Prevent starvation by periodically moving all processes to top queue
-    // Only boost if we're at the interval AND there are processes to boost
+    // Only boost if we're at the interval, there are processes to boost, and we're past initial time
     if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
-      const allProcesses: Process[] = [];
-      
-      // Collect all processes from lower priority queues
+      // Collect all processes from lower priority queues only
       for (let i = 1; i < queues.length; i++) {
         if (queues[i].processes.length > 0) {
-          allProcesses.push(...queues[i].processes.map(p => ({
+          const toBoost = queues[i].processes.map(p => ({
             ...p,
             quantumUsed: 0, // Reset quantum when boosting
+            waitingTime: 0, // Reset waiting time when boosting
             state: 'waiting' as const
-          })));
+          }));
           queues[i].processes = [];
+          // Add to the END of Q1 to maintain some fairness
+          queues[0].processes.push(...toBoost);
         }
-      }
-      
-      // Move all to highest priority queue (add to back to maintain fairness)
-      if (allProcesses.length > 0) {
-        queues[0].processes.push(...allProcesses);
       }
     }
     
