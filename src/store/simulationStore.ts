@@ -851,14 +851,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     get().updateMetrics();
   },
 
-  // Metrics
-  updateMetrics: () => {
-    const state = get();
-    const allInQueues = state.queues.flatMap((q) => q.processes);
-    const all = [...state.completedProcesses, ...allInQueues];
-    const metrics = calculateMetrics(all, state.completedProcesses, state.currentTime);
-    set({ metrics });
-  },
+getMetrics: () => {
+  const state = get();
+  const queues = state.queues ?? [];
+  const allInQueues = queues.flatMap(q => q.processes ?? []);
+  const all = [...(state.completedProcesses ?? []), ...allInQueues];
+  return calculateMetrics(all, state.completedProcesses ?? [], state.currentTime);
+},
+
 
   addGanttEntry: (entry) =>
     set((state) => ({ ganttChart: [...state.ganttChart, entry] })),
