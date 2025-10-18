@@ -296,9 +296,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       // Add to Gantt chart
       const ganttEntry: GanttEntry = {
         processId: process.id,
+        processName: process.name,
+        startTime: currentTime,
+        endTime: currentTime + 1,
         queueLevel: activeQueue.level,
-        start: currentTime,
-        end: currentTime + 1,
       };
       ganttChart.push(ganttEntry);
 
