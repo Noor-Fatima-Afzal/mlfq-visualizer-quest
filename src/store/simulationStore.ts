@@ -103,11 +103,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const id = `P${processCounter}`;
     const arrivalTime = data.arrivalTime ?? 0;
     
+    // CRITICAL: Don't spread data - explicitly set only the fields we need
     const newProcess: Process = {
-      ...data,
       id,
+      name: data.name,
       arrivalTime,
       burstTime: data.burstTime,
+      priority: data.priority,
       remainingTime: data.burstTime,
       waitingTime: 0,
       turnaroundTime: 0,
@@ -120,6 +122,8 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       id, 
       arrivalTime, 
       burstTime: data.burstTime,
+      remainingTime: newProcess.remainingTime,
+      quantumUsed: newProcess.quantumUsed,
       currentTime: state.currentTime 
     });
 
@@ -324,20 +328,20 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         };
       }
 
-      // Check if quantum expired
+      // Check if quantum expired (need to complete full quantum in this queue level)
       if (process.quantumUsed >= activeQueue.timeQuantum) {
-        // Demote to next lower priority queue
+        // Quantum fully used - demote to next lower priority queue
         const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
-        process.quantumUsed = 0;
+        process.quantumUsed = 0; // Reset quantum counter for new queue
         process.state = 'waiting';
         
         queues[nextLevel].processes.push(process);
-        console.log(`Time ${currentTime + 1}: ${process.id} demoted to Q${nextLevel}`);
+        console.log(`Time ${currentTime + 1}: ${process.id} quantum expired, demoted to Q${nextLevel}`);
       } else {
-        // Return to back of same queue
+        // Quantum not expired - return to back of same queue (Round Robin)
         process.state = 'waiting';
         activeQueue.processes.push(process);
-        console.log(`Time ${currentTime + 1}: ${process.id} returns to Q${activeQueueIndex}`);
+        console.log(`Time ${currentTime + 1}: ${process.id} returns to back of Q${activeQueueIndex} (quantum: ${process.quantumUsed}/${activeQueue.timeQuantum})`);
       }
 
       // Update metrics
