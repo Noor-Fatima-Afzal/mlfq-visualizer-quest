@@ -500,17 +500,22 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       return;
     }
 
+    const state = get();
     const id = `P${Date.now()}`;
+    
+    // Use the provided arrival time, or current time if simulation is running
+    const arrivalTime = data.arrivalTime ?? state.currentTime;
+    
     const newProcess: Process = {
       ...data,
       id,
+      arrivalTime,
       remainingTime: data.burstTime,
       waitingTime: 0,
       turnaroundTime: 0,
       quantumUsed: 0,
       responseTime: undefined,
       state: 'waiting',
-      arrivalTime: get().currentTime,
     };
 
     set((state) => {
@@ -626,20 +631,23 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const completedProcesses = [...state.completedProcesses];
     
     // ✅ PRIORITY BOOST: Prevent starvation by periodically moving all processes to top queue
-    if (state.boostInterval > 0 && currentTime % state.boostInterval === 0) {
+    // Only boost if we're at the interval AND there are processes to boost
+    if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
       const allProcesses: Process[] = [];
       
-      // Collect all processes from all queues
+      // Collect all processes from lower priority queues
       for (let i = 1; i < queues.length; i++) {
-        allProcesses.push(...queues[i].processes.map(p => ({
-          ...p,
-          quantumUsed: 0, // Reset quantum when boosting
-          state: 'waiting' as const
-        })));
-        queues[i].processes = [];
+        if (queues[i].processes.length > 0) {
+          allProcesses.push(...queues[i].processes.map(p => ({
+            ...p,
+            quantumUsed: 0, // Reset quantum when boosting
+            state: 'waiting' as const
+          })));
+          queues[i].processes = [];
+        }
       }
       
-      // Move all to highest priority queue
+      // Move all to highest priority queue (add to back to maintain fairness)
       if (allProcesses.length > 0) {
         queues[0].processes.push(...allProcesses);
       }
@@ -735,8 +743,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       activeQueue.processes.push(procRef); // Add to back of queue
     }
 
-    // ✅ FIXED: Aging Promotion (done before boost check)
-    if (state.agingInterval > 0) {
+    // ✅ FIXED: Aging Promotion - only promote from lower queues occasionally
+    // Don't check every tick, only every agingInterval ticks
+    if (state.agingInterval > 0 && currentTime > 0 && currentTime % state.agingInterval === 0) {
       for (let lvl = queues.length - 1; lvl > 0; lvl--) {
         const q = queues[lvl];
         const promote: Process[] = [];
@@ -744,7 +753,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
         for (const p of q.processes) {
           // Promote if waiting time exceeds aging threshold
-          if ((p.waitingTime || 0) > state.agingInterval) {
+          if ((p.waitingTime || 0) >= state.agingInterval) {
             promote.push({ 
               ...p, 
               quantumUsed: 0, // Reset quantum when promoting
