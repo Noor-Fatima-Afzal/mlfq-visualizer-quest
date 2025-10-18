@@ -592,26 +592,16 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     if (simulationInterval) clearInterval(simulationInterval);
 
+    // Run simulation at 500ms intervals
     simulationInterval = setInterval(() => {
       const currentState = get();
-      // CRITICAL: Check if previous step is still processing
       if (!currentState.isRunning || currentState.isPaused) {
         return;
       }
       
-      // Use a flag to prevent concurrent execution
-      if ((window as any).isStepRunning) {
-        console.warn('Step already running, skipping...');
-        return;
-      }
-      
-      (window as any).isStepRunning = true;
-      try {
-        get().stepSimulation();
-      } finally {
-        (window as any).isStepRunning = false;
-      }
-    }, 300);
+      // Execute step
+      get().stepSimulation();
+    }, 500);
   },
 
   pauseSimulation: () => set({ isPaused: true }),
@@ -644,51 +634,58 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
-  // ✅ FULLY CORRECTED MLFQ Simulation Step
+  // ✅ FULLY CORRECTED MLFQ Simulation Step - WITH FUNCTIONAL UPDATE
   stepSimulation: () => {
-    const state = get();
-    if (!state.isRunning || state.isPaused) return;
+    // CRITICAL: Use functional update to ensure we have latest state
+    set((state) => {
+      if (!state.isRunning || state.isPaused) return state;
 
-    const queues: Queue[] = JSON.parse(JSON.stringify(state.queues)); // Deep clone
-    const currentTime = state.currentTime;
-    const completedProcesses = [...state.completedProcesses];
-    
-    // DEBUG: Log queue state every 10 time units
-    if (currentTime % 10 === 0) {
-      console.log(`Time ${currentTime}:`, {
-        Q0: queues[0].processes.length,
-        Q1: queues[1].processes.length,
-        Q2: queues[2].processes.length,
-        Q3: queues[3].processes.length,
-        completed: completedProcesses.length
-      });
-    }
-    
-    // Find highest priority non-empty queue FIRST
-    const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
-    
-    if (activeQueueIndex === -1) {
-      // CPU idle - no processes to run
-      console.log(`Time ${currentTime}: CPU IDLE - No processes in any queue`);
-      const nextTime = currentTime + 1;
-      set({ 
-        currentTime: nextTime, 
-        activeProcess: null,
-        queues 
-      });
-      get().updateMetrics();
+      const queues: Queue[] = JSON.parse(JSON.stringify(state.queues)); // Deep clone
+      const currentTime = state.currentTime;
+      const completedProcesses = [...state.completedProcesses];
       
-      // Stop simulation if everything is done
-      if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
-        console.log(`Simulation complete at time ${nextTime}`);
-        if (simulationInterval) {
-          clearInterval(simulationInterval);
-          simulationInterval = null;
-        }
-        set({ isRunning: false });
+      // DEBUG: Log queue state every 10 time units
+      if (currentTime % 10 === 0) {
+        console.log(`Time ${currentTime}:`, {
+          Q0: queues[0].processes.length,
+          Q1: queues[1].processes.length,
+          Q2: queues[2].processes.length,
+          Q3: queues[3].processes.length,
+          completed: completedProcesses.length
+        });
       }
-      return;
-    }
+      
+      // Find highest priority non-empty queue FIRST
+      const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
+      
+      if (activeQueueIndex === -1) {
+        // CPU idle - no processes to run
+        console.log(`Time ${currentTime}: CPU IDLE - No processes in any queue`);
+        const nextTime = currentTime + 1;
+        
+        // Stop simulation if everything is done
+        if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
+          console.log(`Simulation complete at time ${nextTime}`);
+          if (simulationInterval) {
+            clearInterval(simulationInterval);
+            simulationInterval = null;
+          }
+          return {
+            ...state,
+            currentTime: nextTime,
+            activeProcess: null,
+            queues,
+            isRunning: false
+          };
+        }
+        
+        return {
+          ...state,
+          currentTime: nextTime,
+          activeProcess: null,
+          queues
+        };
+      }
     
     // ✅ PRIORITY BOOST: TEMPORARILY DISABLED FOR DEBUGGING
     // Testing if boost is causing the gaps
