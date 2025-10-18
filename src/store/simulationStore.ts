@@ -111,7 +111,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       name: data.name,
       arrivalTime,
       burstTime: data.burstTime,
-      priority: data.priority,
+      priority: 0, // Always start in highest-priority queue per MLFQ spec
       remainingTime: data.burstTime,
       waitingTime: 0,
       turnaroundTime: 0,
@@ -292,42 +292,47 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         console.log(`Time ${currentTime}: ${process.id} gets CPU for FIRST time (Response Time: ${process.responseTime})`);
       }
 
-      // Execute for 1 time unit
-      process.remainingTime -= 1;
-      process.quantumUsed += 1;
+      // Run CONTINUOUSLY for up to the queue's time quantum or until completion
+      const remainingQuantum = activeQueue.timeQuantum - (process.quantumUsed || 0);
+      const runDuration = Math.max(1, Math.min(process.remainingTime, remainingQuantum));
+      const runStart = currentTime;
+      const runEnd = currentTime + runDuration;
+
+      process.remainingTime -= runDuration;
+      process.quantumUsed += runDuration;
       process.state = 'running';
 
-      console.log(`Time ${currentTime}: Running ${process.id} (Q${activeQueueIndex}) - Remaining: ${process.remainingTime}, Quantum: ${process.quantumUsed}/${activeQueue.timeQuantum}`);
+      console.log(`Time ${runStart}-${runEnd}: Running ${process.id} (Q${activeQueueIndex}) for ${runDuration} units | Remaining: ${process.remainingTime}, Quantum: ${process.quantumUsed}/${activeQueue.timeQuantum}`);
 
-      // Add to Gantt chart (one entry per time unit)
+      // Add a single Gantt entry for this continuous run
       ganttChart.push({
         processId: process.id,
         processName: process.name,
-        startTime: currentTime,
-        endTime: currentTime + 1,
+        startTime: runStart,
+        endTime: runEnd,
         queueLevel: activeQueue.level,
       });
 
       // Rule 4: Check if process completed
       if (process.remainingTime <= 0) {
         process.state = 'completed';
-        process.completionTime = currentTime + 1;
+        process.completionTime = runEnd;
         process.turnaroundTime = process.completionTime - process.arrivalTime;
         process.waitingTime = process.turnaroundTime - process.burstTime;
         
         completedProcesses.push(process);
         
-        console.log(`Time ${currentTime + 1}: ${process.id} COMPLETED`);
+        console.log(`Time ${runEnd}: ${process.id} COMPLETED`);
         console.log(`  Metrics - Turnaround: ${process.turnaroundTime}, Waiting: ${process.waitingTime}, Response: ${process.responseTime}`);
         
         // Calculate metrics with updated completed processes
         const allProcesses = [...completedProcesses, ...queues.flatMap(q => q.processes)];
-        const newMetrics = calculateMetrics(allProcesses, completedProcesses, currentTime + 1);
+        const newMetrics = calculateMetrics(allProcesses, completedProcesses, runEnd);
         
         return {
           ...state,
           queues,
-          currentTime: currentTime + 1,
+          currentTime: runEnd,
           activeProcess: null,
           completedProcesses,
           ganttChart,
@@ -335,32 +340,28 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         };
       }
 
-      // Rule 3: Check if quantum expired
+      // Rule 3 and 5: Check if quantum expired -> demote
       if (process.quantumUsed >= activeQueue.timeQuantum) {
-        // Quantum fully used - demote to next lower priority queue
         const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
-        
-        // Rule 5: Reset quantum counter when moving to new queue
-        process.quantumUsed = 0;
+        process.quantumUsed = 0; // Reset when moving to new queue
         process.state = 'waiting';
-        
         queues[nextLevel].processes.push(process);
-        console.log(`Time ${currentTime + 1}: ${process.id} quantum expired, demoted from Q${activeQueueIndex} to Q${nextLevel}`);
+        console.log(`Time ${runEnd}: ${process.id} quantum expired, demoted from Q${activeQueueIndex} to Q${nextLevel}`);
       } else {
-        // Quantum not expired - return to back of same queue (Round Robin)
+        // Not typical in standard MLFQ, but support for preemption scenarios
         process.state = 'waiting';
         activeQueue.processes.push(process);
-        console.log(`Time ${currentTime + 1}: ${process.id} returns to back of Q${activeQueueIndex} (quantum: ${process.quantumUsed}/${activeQueue.timeQuantum})`);
+        console.log(`Time ${runEnd}: ${process.id} returns to back of Q${activeQueueIndex} (quantum: ${process.quantumUsed}/${activeQueue.timeQuantum})`);
       }
 
-      // Update metrics
+      // Update metrics after this run block
       const allProcesses = [...completedProcesses, ...queues.flatMap(q => q.processes)];
-      const newMetrics = calculateMetrics(allProcesses, completedProcesses, currentTime + 1);
+      const newMetrics = calculateMetrics(allProcesses, completedProcesses, runEnd);
 
       return {
         ...state,
         queues,
-        currentTime: currentTime + 1,
+        currentTime: runEnd,
         activeProcess: process,
         ganttChart,
         completedProcesses,
