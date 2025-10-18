@@ -585,17 +585,32 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   // Simulation Control
   startSimulation: () => {
-    const { isRunning } = get();
-    if (isRunning) return;
+    const state = get();
+    if (state.isRunning) return;
 
     set({ isRunning: true, isPaused: false });
 
     if (simulationInterval) clearInterval(simulationInterval);
 
     simulationInterval = setInterval(() => {
-      const { isRunning: running, isPaused } = get();
-      if (!running || isPaused) return;
-      get().stepSimulation();
+      const currentState = get();
+      // CRITICAL: Check if previous step is still processing
+      if (!currentState.isRunning || currentState.isPaused) {
+        return;
+      }
+      
+      // Use a flag to prevent concurrent execution
+      if ((window as any).isStepRunning) {
+        console.warn('Step already running, skipping...');
+        return;
+      }
+      
+      (window as any).isStepRunning = true;
+      try {
+        get().stepSimulation();
+      } finally {
+        (window as any).isStepRunning = false;
+      }
     }, 300);
   },
 
@@ -750,6 +765,8 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       
       completedProcesses.push(procRef);
       
+      console.log(`Time ${currentTime}: Process ${procRef.id} COMPLETED`);
+      
       set({
         queues,
         currentTime: currentTime + 1,
@@ -762,19 +779,35 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       return;
     }
 
-    // ✅ FIXED: Demotion logic
+    // ✅ FIXED: Demotion logic - CRITICAL: Only add process to ONE queue
     if (procRef.quantumUsed >= activeQueue.timeQuantum) {
       // Time quantum expired - demote to next lower priority queue
       procRef.quantumUsed = 0; // Reset quantum counter
-      procRef.waitingTime = 0; // Reset waiting time on demotion (important!)
+      procRef.waitingTime = 0; // Reset waiting time on demotion
       procRef.state = 'waiting';
       
       const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
+      
+      console.log(`Time ${currentTime}: Demoting ${procRef.id} from Q${activeQueueIndex} to Q${nextLevel}`);
+      
+      // CRITICAL: Make sure we only add to the target queue
       queues[nextLevel].processes.push(procRef);
+      
+      // Verify no duplication
+      const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
+      console.log(`Total processes in queues after demotion: ${totalInQueues}`);
+      
     } else {
       // Quantum not expired - return to back of same queue (Round Robin)
       procRef.state = 'waiting';
-      activeQueue.processes.push(procRef); // Add to back of queue
+      
+      console.log(`Time ${currentTime}: Returning ${procRef.id} to back of Q${activeQueueIndex}`);
+      
+      activeQueue.processes.push(procRef);
+      
+      // Verify no duplication
+      const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
+      console.log(`Total processes in queues after return: ${totalInQueues}`);
     }
 
     // ✅ FIXED: Aging Promotion - DISABLED FOR NOW TO DEBUG
