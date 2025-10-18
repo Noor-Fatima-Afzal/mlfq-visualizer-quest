@@ -691,21 +691,27 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         end: currentTime + 1,
       };
 
-      queues.forEach(q => {
-        q.processes.forEach(p => {
-          if (p.id !== procRef.id && p.state !== 'completed') {
-            p.waitingTime = (p.waitingTime || 0) + 1;
-          }
-        });
-      });
+      // FIXED: Don't increment waiting time during this time unit
+      // We'll add it at the end only for processes still in queues
 
       if (procRef.remainingTime <= 0) {
         procRef.turnaroundTime = currentTime + 1 - procRef.arrivalTime;
         procRef.state = 'completed';
         
+        // Calculate final waiting time: turnaround - burst
+        const originalBurstTime = procRef.turnaroundTime - procRef.waitingTime;
+        procRef.waitingTime = procRef.turnaroundTime - originalBurstTime;
+        
         completedProcesses.push(procRef);
         
-        console.log(`Time ${currentTime}: Process ${procRef.id} COMPLETED`);
+        console.log(`Time ${currentTime + 1}: Process ${procRef.id} COMPLETED - Turnaround: ${procRef.turnaroundTime}, Waiting: ${procRef.waitingTime}, Response: ${procRef.responseTime}`);
+        
+        // Increment waiting time for remaining processes
+        queues.forEach(q => {
+          q.processes.forEach(p => {
+            p.waitingTime = (p.waitingTime || 0) + 1;
+          });
+        });
         
         const newState = {
           ...state,
@@ -716,7 +722,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           ganttChart: [...state.ganttChart, ganttEntry],
         };
 
-        // Update metrics after state change
         setTimeout(() => get().updateMetrics(), 0);
         
         return newState;
@@ -724,7 +729,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
       if (procRef.quantumUsed >= activeQueue.timeQuantum) {
         procRef.quantumUsed = 0;
-        procRef.waitingTime = 0;
         procRef.state = 'waiting';
         
         const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
@@ -733,19 +737,20 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         
         queues[nextLevel].processes.push(procRef);
         
-        const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
-        console.log(`Total processes in queues after demotion: ${totalInQueues}`);
-        
       } else {
         procRef.state = 'waiting';
         
         console.log(`Time ${currentTime}: Returning ${procRef.id} to back of Q${activeQueueIndex}`);
         
         activeQueue.processes.push(procRef);
-        
-        const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
-        console.log(`Total processes in queues after return: ${totalInQueues}`);
       }
+
+      // Increment waiting time for all processes in queues after placing current process
+      queues.forEach(q => {
+        q.processes.forEach(p => {
+          p.waitingTime = (p.waitingTime || 0) + 1;
+        });
+      });
 
       const newState = {
         ...state,
@@ -755,7 +760,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         ganttChart: [...state.ganttChart, ganttEntry],
       };
 
-      // Update metrics after state change
       setTimeout(() => get().updateMetrics(), 0);
       
       return newState;
