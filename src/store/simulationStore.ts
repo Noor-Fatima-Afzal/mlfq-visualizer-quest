@@ -44,7 +44,7 @@ const initialQueues: Queue[] = [
 ];
 
 const calculateMetrics = (all: Process[], completed: Process[], currentTime: number) => {
-  if (all.length === 0) {
+  if (completed.length === 0) {
     return {
       avgTurnaroundTime: 0,
       avgWaitingTime: 0,
@@ -54,17 +54,19 @@ const calculateMetrics = (all: Process[], completed: Process[], currentTime: num
     };
   }
 
-  const totalTurnaround = completed.reduce((sum, p) => sum + (p.turnaroundTime || 0), 0);
-  const totalWaiting = completed.reduce((sum, p) => sum + (p.waitingTime || 0), 0);
-  const totalResponse = completed.reduce((sum, p) => sum + (p.responseTime !== undefined ? p.responseTime : 0), 0);
-  const totalBurst = all.reduce((sum, p) => sum + (p.burstTime || 0), 0);
+  const totalTurnaround = completed.reduce((sum, p) => sum + p.turnaroundTime, 0);
+  const totalWaiting = completed.reduce((sum, p) => sum + p.waitingTime, 0);
+  const totalResponse = completed.reduce((sum, p) => sum + (p.responseTime || 0), 0);
+  
+  // CPU Utilization: sum of all burst times / current time
+  const totalBurstTime = all.reduce((sum, p) => sum + p.burstTime, 0);
 
   return {
-    avgTurnaroundTime: completed.length > 0 ? totalTurnaround / completed.length : 0,
-    avgWaitingTime: completed.length > 0 ? totalWaiting / completed.length : 0,
-    avgResponseTime: completed.length > 0 ? totalResponse / completed.length : 0,
-    throughput: completed.length / Math.max(currentTime, 1),
-    cpuUtilization: currentTime > 0 ? Math.min((totalBurst / currentTime) * 100, 100) : 0,
+    avgTurnaroundTime: totalTurnaround / completed.length,
+    avgWaitingTime: totalWaiting / completed.length,
+    avgResponseTime: totalResponse / completed.length,
+    throughput: currentTime > 0 ? completed.length / currentTime : 0,
+    cpuUtilization: currentTime > 0 ? Math.min((totalBurstTime / currentTime) * 100, 100) : 0,
   };
 };
 
@@ -236,18 +238,20 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     set((state) => {
       if (!state.isRunning || state.isPaused) return state;
 
+      // Deep clone to avoid mutations
       const queues: Queue[] = JSON.parse(JSON.stringify(state.queues));
       const currentTime = state.currentTime;
       const completedProcesses = [...state.completedProcesses];
       const ganttChart = [...state.ganttChart];
       
-      // Find highest priority non-empty queue
+      // Rule 1: Find highest priority non-empty queue
       const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
       
       if (activeQueueIndex === -1) {
-        // CPU idle
+        // No processes available - CPU is idle
         console.log(`Time ${currentTime}: CPU IDLE`);
         
+        // Check if simulation should end
         if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
           console.log(`Simulation complete at time ${currentTime}`);
           if (simulationInterval) {
@@ -255,7 +259,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
             simulationInterval = null;
           }
           
-          // Final metrics update
+          // Final metrics calculation
           const allProcesses = [...completedProcesses];
           const finalMetrics = calculateMetrics(allProcesses, completedProcesses, currentTime);
           
@@ -269,6 +273,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           };
         }
         
+        // Continue idle - increment time
         return {
           ...state,
           currentTime: currentTime + 1,
@@ -277,10 +282,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         };
       }
 
+      // Rule 2: Get process from front of queue (FIFO within queue)
       const activeQueue = queues[activeQueueIndex];
       const process = activeQueue.processes.shift()!;
       
-      // Set response time on FIRST execution
+      // Set response time on FIRST execution only
       if (process.responseTime === undefined) {
         process.responseTime = currentTime - process.arrivalTime;
         console.log(`Time ${currentTime}: ${process.id} gets CPU for FIRST time (Response Time: ${process.responseTime})`);
@@ -288,33 +294,33 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
       // Execute for 1 time unit
       process.remainingTime -= 1;
-      process.quantumUsed = (process.quantumUsed || 0) + 1;
+      process.quantumUsed += 1;
       process.state = 'running';
 
-      console.log(`Time ${currentTime}: Running ${process.id} (Q${activeQueueIndex}) - Remaining: ${process.remainingTime}, Quantum Used: ${process.quantumUsed}/${activeQueue.timeQuantum}`);
+      console.log(`Time ${currentTime}: Running ${process.id} (Q${activeQueueIndex}) - Remaining: ${process.remainingTime}, Quantum: ${process.quantumUsed}/${activeQueue.timeQuantum}`);
 
-      // Add to Gantt chart
-      const ganttEntry: GanttEntry = {
+      // Add to Gantt chart (one entry per time unit)
+      ganttChart.push({
         processId: process.id,
         processName: process.name,
         startTime: currentTime,
         endTime: currentTime + 1,
         queueLevel: activeQueue.level,
-      };
-      ganttChart.push(ganttEntry);
+      });
 
-      // Check if process completed
+      // Rule 4: Check if process completed
       if (process.remainingTime <= 0) {
         process.state = 'completed';
-        process.turnaroundTime = currentTime + 1 - process.arrivalTime;
+        process.completionTime = currentTime + 1;
+        process.turnaroundTime = process.completionTime - process.arrivalTime;
         process.waitingTime = process.turnaroundTime - process.burstTime;
         
         completedProcesses.push(process);
         
         console.log(`Time ${currentTime + 1}: ${process.id} COMPLETED`);
-        console.log(`  Turnaround: ${process.turnaroundTime}, Waiting: ${process.waitingTime}, Response: ${process.responseTime}`);
+        console.log(`  Metrics - Turnaround: ${process.turnaroundTime}, Waiting: ${process.waitingTime}, Response: ${process.responseTime}`);
         
-        // Update metrics
+        // Calculate metrics with updated completed processes
         const allProcesses = [...completedProcesses, ...queues.flatMap(q => q.processes)];
         const newMetrics = calculateMetrics(allProcesses, completedProcesses, currentTime + 1);
         
@@ -329,15 +335,17 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         };
       }
 
-      // Check if quantum expired (need to complete full quantum in this queue level)
+      // Rule 3: Check if quantum expired
       if (process.quantumUsed >= activeQueue.timeQuantum) {
         // Quantum fully used - demote to next lower priority queue
         const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
-        process.quantumUsed = 0; // Reset quantum counter for new queue
+        
+        // Rule 5: Reset quantum counter when moving to new queue
+        process.quantumUsed = 0;
         process.state = 'waiting';
         
         queues[nextLevel].processes.push(process);
-        console.log(`Time ${currentTime + 1}: ${process.id} quantum expired, demoted to Q${nextLevel}`);
+        console.log(`Time ${currentTime + 1}: ${process.id} quantum expired, demoted from Q${activeQueueIndex} to Q${nextLevel}`);
       } else {
         // Quantum not expired - return to back of same queue (Round Robin)
         process.state = 'waiting';
@@ -355,6 +363,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         currentTime: currentTime + 1,
         activeProcess: process,
         ganttChart,
+        completedProcesses,
         metrics: newMetrics,
       };
     });

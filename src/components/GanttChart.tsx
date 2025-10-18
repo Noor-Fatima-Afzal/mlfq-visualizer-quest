@@ -50,7 +50,7 @@ export const GanttChart = () => {
           </div>
 
           {/* Gantt bars */}
-          <div className="relative min-h-[60px] space-y-2">
+          <div className="relative h-12 bg-muted/20 rounded">
             {ganttChart.map((entry, index) => {
               const width = (entry.endTime - entry.startTime) * scale;
               const left = entry.startTime * scale;
@@ -62,7 +62,7 @@ export const GanttChart = () => {
                   initial={{ scaleX: 0, opacity: 0 }}
                   animate={{ scaleX: 1, opacity: 1 }}
                   transition={{ duration: 0.3 }}
-                  className="absolute h-10 rounded flex items-center justify-center text-xs font-medium text-white"
+                  className="absolute top-1 h-10 rounded flex items-center justify-center text-xs font-medium text-white shadow-sm"
                   style={{
                     left: `${left}px`,
                     width: `${width}px`,
