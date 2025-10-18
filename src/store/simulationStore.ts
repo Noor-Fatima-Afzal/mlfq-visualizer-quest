@@ -622,7 +622,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     if (!state.isRunning || state.isPaused) return;
 
     const queues: Queue[] = JSON.parse(JSON.stringify(state.queues)); // Deep clone
-    let currentTime = state.currentTime + 1;
+    const currentTime = state.currentTime;
     const completedProcesses = [...state.completedProcesses];
     
     // ✅ PRIORITY BOOST: Prevent starvation by periodically moving all processes to top queue
@@ -650,8 +650,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     
     if (activeQueueIndex === -1) {
       // CPU idle - no processes to run
+      const nextTime = currentTime + 1;
       set({ 
-        currentTime, 
+        currentTime: nextTime, 
         activeProcess: null,
         queues 
       });
@@ -676,7 +677,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     // Mark response time if first execution
     if (procRef.responseTime === undefined) {
-      procRef.responseTime = currentTime - procRef.arrivalTime - 1;
+      procRef.responseTime = currentTime - procRef.arrivalTime;
     }
 
     // Execute 1 time unit
@@ -688,8 +689,8 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const ganttEntry: GanttEntry = {
       processId: procRef.id,
       queueLevel: activeQueue.level,
-      start: currentTime - 1,
-      end: currentTime,
+      start: currentTime,
+      end: currentTime + 1,
     };
 
     // ✅ FIXED: Update waiting time ONLY for processes that are ready but not running
@@ -703,14 +704,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     // ✅ Check for process completion
     if (procRef.remainingTime <= 0) {
-      procRef.turnaroundTime = currentTime - procRef.arrivalTime;
+      procRef.turnaroundTime = currentTime + 1 - procRef.arrivalTime;
       procRef.state = 'completed';
       
       completedProcesses.push(procRef);
       
       set({
         queues,
-        currentTime,
+        currentTime: currentTime + 1,
         activeProcess: null,
         completedProcesses,
         ganttChart: [...state.ganttChart, ganttEntry],
@@ -765,7 +766,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     // ✅ Commit final state
     set({
       queues,
-      currentTime,
+      currentTime: currentTime + 1,
       activeProcess: procRef,
       ganttChart: [...state.ganttChart, ganttEntry],
     });
