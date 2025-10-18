@@ -401,7 +401,7 @@ import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
 interface SimulationStore extends SimulationState {
   numQueues: number;
   agingInterval: number;
-  boostInterval: number; // New: Priority boost interval
+  boostInterval: number;
 
   setQueues: (queues: Queue[]) => void;
   addProcess: (
@@ -433,14 +433,11 @@ interface SimulationStore extends SimulationState {
   addGanttEntry: (entry: GanttEntry) => void;
 }
 
-// Fixed: Proper 4-queue setup
-// Queue 0: Highest priority, shortest quantum
-// Queue 3: Lowest priority, longest quantum
 const initialQueues: Queue[] = [
-  { level: 0, timeQuantum: 4, processes: [] },   // Highest priority - RR (4 units)
-  { level: 1, timeQuantum: 8, processes: [] },   // Medium-high priority - RR (8 units)
-  { level: 2, timeQuantum: 16, processes: [] },  // Medium-low priority - RR (16 units)
-  { level: 3, timeQuantum: 32, processes: [] },  // Lowest priority - RR (32 units) or FCFS
+  { level: 0, timeQuantum: 4, processes: [] },
+  { level: 1, timeQuantum: 8, processes: [] },
+  { level: 2, timeQuantum: 16, processes: [] },
+  { level: 3, timeQuantum: 32, processes: [] },
 ];
 
 const calculateMetrics = (all: Process[], completed: Process[], currentTime: number) => {
@@ -481,7 +478,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   activeProcess: null,
   numQueues: 4,
   agingInterval: 10,
-  boostInterval: 50, // New: Boost all processes every 50 time units
+  boostInterval: 50,
   metrics: {
     avgTurnaroundTime: 0,
     avgWaitingTime: 0,
@@ -490,11 +487,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     cpuUtilization: 0,
   },
 
-  // Basic setters
   setQueues: (queues) => set({ queues }),
 
   addProcess: (data) => {
-    // Input validation
     if (data.burstTime <= 0) {
       console.error('Burst time must be positive');
       return;
@@ -502,9 +497,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     const state = get();
     const id = `P${Date.now()}`;
-    
-    // CRITICAL: Use the provided arrival time, default to 0 if not provided
-    // This ensures processes added before simulation have arrival time 0
     const arrivalTime = data.arrivalTime ?? 0;
     
     const newProcess: Process = {
@@ -560,8 +552,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const newQueues: Queue[] = [];
       for (let i = 0; i < num; i++) {
         const existing = state.queues[i];
-        // Exponentially increasing time quantums
-        const defaultQuantum = Math.pow(2, i + 2); // 4, 8, 16, 32...
+        const defaultQuantum = Math.pow(2, i + 2);
         
         newQueues.push({
           level: i,
@@ -583,7 +574,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   
   setBoostInterval: (interval) => set({ boostInterval: interval }),
 
-  // Simulation Control
   startSimulation: () => {
     const state = get();
     if (state.isRunning) return;
@@ -592,14 +582,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     if (simulationInterval) clearInterval(simulationInterval);
 
-    // Run simulation at 500ms intervals
     simulationInterval = setInterval(() => {
       const currentState = get();
       if (!currentState.isRunning || currentState.isPaused) {
         return;
       }
       
-      // Execute step
       get().stepSimulation();
     }, 500);
   },
@@ -634,17 +622,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
-  // ✅ FULLY CORRECTED MLFQ Simulation Step - WITH FUNCTIONAL UPDATE
   stepSimulation: () => {
-    // CRITICAL: Use functional update to ensure we have latest state
     set((state) => {
       if (!state.isRunning || state.isPaused) return state;
 
-      const queues: Queue[] = JSON.parse(JSON.stringify(state.queues)); // Deep clone
+      const queues: Queue[] = JSON.parse(JSON.stringify(state.queues));
       const currentTime = state.currentTime;
       const completedProcesses = [...state.completedProcesses];
       
-      // DEBUG: Log queue state every 10 time units
       if (currentTime % 10 === 0) {
         console.log(`Time ${currentTime}:`, {
           Q0: queues[0].processes.length,
@@ -655,15 +640,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         });
       }
       
-      // Find highest priority non-empty queue FIRST
       const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
       
       if (activeQueueIndex === -1) {
-        // CPU idle - no processes to run
         console.log(`Time ${currentTime}: CPU IDLE - No processes in any queue`);
         const nextTime = currentTime + 1;
         
-        // Stop simulation if everything is done
         if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
           console.log(`Simulation complete at time ${nextTime}`);
           if (simulationInterval) {
@@ -686,179 +668,108 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
           queues
         };
       }
-    
-    // ✅ PRIORITY BOOST: TEMPORARILY DISABLED FOR DEBUGGING
-    // Testing if boost is causing the gaps
-    /*
-    if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
-      // Move all processes from lower queues to Q1
-      for (let i = 1; i < queues.length; i++) {
-        if (queues[i].processes.length > 0) {
-          queues[i].processes.forEach(p => {
-            p.quantumUsed = 0;
-            p.waitingTime = 0;
-            p.state = 'waiting';
-          });
-          queues[0].processes.push(...queues[i].processes);
-          queues[i].processes = [];
-        }
+
+      const activeQueue = queues[activeQueueIndex];
+      const procRef = activeQueue.processes.shift()!;
+      
+      if (currentTime % 5 === 0) {
+        console.log(`Time ${currentTime}: Running ${procRef.id} from Q${activeQueueIndex}, remaining: ${procRef.remainingTime}`);
       }
-      // Re-find active queue after boost
-      const newActiveIndex = queues.findIndex(q => q.processes.length > 0);
-      if (newActiveIndex === -1) {
-        set({ 
-          currentTime: currentTime + 1, 
-          activeProcess: null,
-          queues 
+
+      if (procRef.responseTime === undefined) {
+        procRef.responseTime = currentTime - procRef.arrivalTime;
+      }
+
+      procRef.remainingTime -= 1;
+      procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
+      procRef.state = 'running';
+
+      const ganttEntry: GanttEntry = {
+        processId: procRef.id,
+        queueLevel: activeQueue.level,
+        start: currentTime,
+        end: currentTime + 1,
+      };
+
+      queues.forEach(q => {
+        q.processes.forEach(p => {
+          if (p.id !== procRef.id && p.state !== 'completed') {
+            p.waitingTime = (p.waitingTime || 0) + 1;
+          }
         });
-        get().updateMetrics();
-        return;
-      }
-    }
-    */
-
-    const activeQueue = queues[activeQueueIndex];
-    
-    // Take the first process in the queue (FIFO/Round Robin)
-    const procRef = activeQueue.processes.shift()!;
-    
-    // DEBUG: Log process execution
-    if (currentTime % 5 === 0) {
-      console.log(`Time ${currentTime}: Running ${procRef.id} from Q${activeQueueIndex}, remaining: ${procRef.remainingTime}`);
-    }
-
-    // Mark response time if first execution
-    if (procRef.responseTime === undefined) {
-      procRef.responseTime = currentTime - procRef.arrivalTime;
-    }
-
-    // Execute 1 time unit
-    procRef.remainingTime -= 1;
-    procRef.quantumUsed = (procRef.quantumUsed || 0) + 1;
-    procRef.state = 'running';
-
-    // Add Gantt chart entry
-    const ganttEntry: GanttEntry = {
-      processId: procRef.id,
-      queueLevel: activeQueue.level,
-      start: currentTime,
-      end: currentTime + 1,
-    };
-
-    // ✅ FIXED: Update waiting time for processes in queues (not the running one)
-    queues.forEach(q => {
-      q.processes.forEach(p => {
-        // Only increment waiting time for processes waiting in queues
-        if (p.id !== procRef.id && p.state !== 'completed') {
-          p.waitingTime = (p.waitingTime || 0) + 1;
-        }
       });
-    });
 
-    // ✅ Check for process completion
-    if (procRef.remainingTime <= 0) {
-      procRef.turnaroundTime = currentTime + 1 - procRef.arrivalTime;
-      procRef.state = 'completed';
-      
-      completedProcesses.push(procRef);
-      
-      console.log(`Time ${currentTime}: Process ${procRef.id} COMPLETED`);
-      
-      set({
+      if (procRef.remainingTime <= 0) {
+        procRef.turnaroundTime = currentTime + 1 - procRef.arrivalTime;
+        procRef.state = 'completed';
+        
+        completedProcesses.push(procRef);
+        
+        console.log(`Time ${currentTime}: Process ${procRef.id} COMPLETED`);
+        
+        const newState = {
+          ...state,
+          queues,
+          currentTime: currentTime + 1,
+          activeProcess: null,
+          completedProcesses,
+          ganttChart: [...state.ganttChart, ganttEntry],
+        };
+
+        // Update metrics after state change
+        setTimeout(() => get().updateMetrics(), 0);
+        
+        return newState;
+      }
+
+      if (procRef.quantumUsed >= activeQueue.timeQuantum) {
+        procRef.quantumUsed = 0;
+        procRef.waitingTime = 0;
+        procRef.state = 'waiting';
+        
+        const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
+        
+        console.log(`Time ${currentTime}: Demoting ${procRef.id} from Q${activeQueueIndex} to Q${nextLevel}`);
+        
+        queues[nextLevel].processes.push(procRef);
+        
+        const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
+        console.log(`Total processes in queues after demotion: ${totalInQueues}`);
+        
+      } else {
+        procRef.state = 'waiting';
+        
+        console.log(`Time ${currentTime}: Returning ${procRef.id} to back of Q${activeQueueIndex}`);
+        
+        activeQueue.processes.push(procRef);
+        
+        const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
+        console.log(`Total processes in queues after return: ${totalInQueues}`);
+      }
+
+      const newState = {
+        ...state,
         queues,
         currentTime: currentTime + 1,
-        activeProcess: null,
-        completedProcesses,
+        activeProcess: procRef,
         ganttChart: [...state.ganttChart, ganttEntry],
-      });
+      };
 
-      get().updateMetrics();
-      return;
-    }
-
-    // ✅ FIXED: Demotion logic - CRITICAL: Only add process to ONE queue
-    if (procRef.quantumUsed >= activeQueue.timeQuantum) {
-      // Time quantum expired - demote to next lower priority queue
-      procRef.quantumUsed = 0; // Reset quantum counter
-      procRef.waitingTime = 0; // Reset waiting time on demotion
-      procRef.state = 'waiting';
+      // Update metrics after state change
+      setTimeout(() => get().updateMetrics(), 0);
       
-      const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
-      
-      console.log(`Time ${currentTime}: Demoting ${procRef.id} from Q${activeQueueIndex} to Q${nextLevel}`);
-      
-      // CRITICAL: Make sure we only add to the target queue
-      queues[nextLevel].processes.push(procRef);
-      
-      // Verify no duplication
-      const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
-      console.log(`Total processes in queues after demotion: ${totalInQueues}`);
-      
-    } else {
-      // Quantum not expired - return to back of same queue (Round Robin)
-      procRef.state = 'waiting';
-      
-      console.log(`Time ${currentTime}: Returning ${procRef.id} to back of Q${activeQueueIndex}`);
-      
-      activeQueue.processes.push(procRef);
-      
-      // Verify no duplication
-      const totalInQueues = queues.reduce((sum, q) => sum + q.processes.length, 0);
-      console.log(`Total processes in queues after return: ${totalInQueues}`);
-    }
-
-    // ✅ FIXED: Aging Promotion - DISABLED FOR NOW TO DEBUG
-    // The aging mechanism seems to be causing the gaps
-    // TODO: Re-enable with proper logic after confirming base simulation works
-    
-    // Aging disabled - commented out
-    /*
-    if (state.agingInterval > 0 && currentTime > 0 && currentTime % state.agingInterval === 0) {
-      for (let lvl = queues.length - 1; lvl > 0; lvl--) {
-        const q = queues[lvl];
-        const promote: Process[] = [];
-        const keep: Process[] = [];
-
-        for (const p of q.processes) {
-          if ((p.waitingTime || 0) >= state.agingInterval * 2) {
-            promote.push({ 
-              ...p, 
-              quantumUsed: 0,
-              waitingTime: 0,
-              state: 'waiting'
-            });
-          } else {
-            keep.push(p);
-          }
-        }
-
-        if (promote.length > 0) {
-          q.processes = keep;
-          queues[lvl - 1].processes.push(...promote);
-        }
-      }
-    }
-    */
-
-    // ✅ Commit final state
-    set({
-      queues,
-      currentTime: currentTime + 1,
-      activeProcess: procRef,
-      ganttChart: [...state.ganttChart, ganttEntry],
+      return newState;
     });
-
-    get().updateMetrics();
   },
 
-getMetrics: () => {
-  const state = get();
-  const queues = state.queues ?? [];
-  const allInQueues = queues.flatMap(q => q.processes ?? []);
-  const all = [...(state.completedProcesses ?? []), ...allInQueues];
-  return calculateMetrics(all, state.completedProcesses ?? [], state.currentTime);
-},
-
+  updateMetrics: () => {
+    const state = get();
+    const queues = state.queues ?? [];
+    const allInQueues = queues.flatMap(q => q.processes ?? []);
+    const all = [...(state.completedProcesses ?? []), ...allInQueues];
+    const metrics = calculateMetrics(all, state.completedProcesses ?? [], state.currentTime);
+    set({ metrics });
+  },
 
   addGanttEntry: (entry) =>
     set((state) => ({ ganttChart: [...state.ganttChart, entry] })),
