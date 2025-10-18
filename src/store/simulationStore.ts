@@ -638,11 +638,23 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const currentTime = state.currentTime;
     const completedProcesses = [...state.completedProcesses];
     
+    // DEBUG: Log queue state every 10 time units
+    if (currentTime % 10 === 0) {
+      console.log(`Time ${currentTime}:`, {
+        Q0: queues[0].processes.length,
+        Q1: queues[1].processes.length,
+        Q2: queues[2].processes.length,
+        Q3: queues[3].processes.length,
+        completed: completedProcesses.length
+      });
+    }
+    
     // Find highest priority non-empty queue FIRST
     const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
     
     if (activeQueueIndex === -1) {
       // CPU idle - no processes to run
+      console.log(`Time ${currentTime}: CPU IDLE - No processes in any queue`);
       const nextTime = currentTime + 1;
       set({ 
         currentTime: nextTime, 
@@ -653,6 +665,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       
       // Stop simulation if everything is done
       if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
+        console.log(`Simulation complete at time ${nextTime}`);
         if (simulationInterval) {
           clearInterval(simulationInterval);
           simulationInterval = null;
@@ -696,6 +709,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     
     // Take the first process in the queue (FIFO/Round Robin)
     const procRef = activeQueue.processes.shift()!;
+    
+    // DEBUG: Log process execution
+    if (currentTime % 5 === 0) {
+      console.log(`Time ${currentTime}: Running ${procRef.id} from Q${activeQueueIndex}, remaining: ${procRef.remainingTime}`);
+    }
 
     // Mark response time if first execution
     if (procRef.responseTime === undefined) {
