@@ -638,26 +638,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const currentTime = state.currentTime;
     const completedProcesses = [...state.completedProcesses];
     
-    // ✅ PRIORITY BOOST: Prevent starvation by periodically moving all processes to top queue
-    // Only boost if we're at the interval, there are processes to boost, and we're past initial time
-    if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
-      // Collect all processes from lower priority queues only
-      for (let i = 1; i < queues.length; i++) {
-        if (queues[i].processes.length > 0) {
-          const toBoost = queues[i].processes.map(p => ({
-            ...p,
-            quantumUsed: 0, // Reset quantum when boosting
-            waitingTime: 0, // Reset waiting time when boosting
-            state: 'waiting' as const
-          }));
-          queues[i].processes = [];
-          // Add to the END of Q1 to maintain some fairness
-          queues[0].processes.push(...toBoost);
-        }
-      }
-    }
-    
-    // Find highest priority non-empty queue
+    // Find highest priority non-empty queue FIRST
     const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
     
     if (activeQueueIndex === -1) {
@@ -680,12 +661,39 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       }
       return;
     }
+    
+    // ✅ PRIORITY BOOST: Only apply AFTER we know there are processes
+    // Apply boost BEFORE selecting which process to run
+    if (state.boostInterval > 0 && currentTime > 0 && currentTime % state.boostInterval === 0) {
+      // Move all processes from lower queues to Q1
+      for (let i = 1; i < queues.length; i++) {
+        if (queues[i].processes.length > 0) {
+          queues[i].processes.forEach(p => {
+            p.quantumUsed = 0;
+            p.waitingTime = 0;
+            p.state = 'waiting';
+          });
+          queues[0].processes.push(...queues[i].processes);
+          queues[i].processes = [];
+        }
+      }
+      // Re-find active queue after boost
+      const newActiveIndex = queues.findIndex(q => q.processes.length > 0);
+      if (newActiveIndex === -1) {
+        set({ 
+          currentTime: currentTime + 1, 
+          activeProcess: null,
+          queues 
+        });
+        get().updateMetrics();
+        return;
+      }
+    }
 
     const activeQueue = queues[activeQueueIndex];
     
-    // ✅ For all queues, use Round Robin (FIFO order)
-    // Take the first process in the queue
-    const procRef = activeQueue.processes.shift()!; // Remove from front
+    // Take the first process in the queue (FIFO/Round Robin)
+    const procRef = activeQueue.processes.shift()!;
 
     // Mark response time if first execution
     if (procRef.responseTime === undefined) {
