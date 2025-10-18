@@ -701,9 +701,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       end: currentTime + 1,
     };
 
-    // ✅ FIXED: Update waiting time ONLY for processes that are ready but not running
+    // ✅ FIXED: Update waiting time for processes in queues (not the running one)
     queues.forEach(q => {
       q.processes.forEach(p => {
+        // Only increment waiting time for processes waiting in queues
         if (p.id !== procRef.id && p.state !== 'completed') {
           p.waitingTime = (p.waitingTime || 0) + 1;
         }
@@ -733,6 +734,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     if (procRef.quantumUsed >= activeQueue.timeQuantum) {
       // Time quantum expired - demote to next lower priority queue
       procRef.quantumUsed = 0; // Reset quantum counter
+      procRef.waitingTime = 0; // Reset waiting time on demotion (important!)
       procRef.state = 'waiting';
       
       const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
@@ -743,8 +745,8 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       activeQueue.processes.push(procRef); // Add to back of queue
     }
 
-    // ✅ FIXED: Aging Promotion - only promote from lower queues occasionally
-    // Don't check every tick, only every agingInterval ticks
+    // ✅ FIXED: Aging Promotion - only promote from lower queues when appropriate
+    // Check aging only at aging interval boundaries to avoid constant promotions
     if (state.agingInterval > 0 && currentTime > 0 && currentTime % state.agingInterval === 0) {
       for (let lvl = queues.length - 1; lvl > 0; lvl--) {
         const q = queues[lvl];
@@ -752,8 +754,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         const keep: Process[] = [];
 
         for (const p of q.processes) {
-          // Promote if waiting time exceeds aging threshold
-          if ((p.waitingTime || 0) >= state.agingInterval) {
+          // Promote if waiting time significantly exceeds aging threshold
+          // Use 2x aging interval to avoid premature promotions
+          if ((p.waitingTime || 0) >= state.agingInterval * 2) {
             promote.push({ 
               ...p, 
               quantumUsed: 0, // Reset quantum when promoting
