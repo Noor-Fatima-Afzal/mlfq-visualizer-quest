@@ -1,10 +1,12 @@
+export type SchedulingAlgorithm = 'FIFO' | 'SJF' | 'STCF' | 'RR' | 'MLFQ';
+
 export interface Process {
   id: string;
   name: string;
   arrivalTime: number;
   burstTime: number;
   remainingTime: number;
-  priority: number; // Queue level (0 = highest priority)
+  priority: number; // Queue level (0 = highest priority) - used for MLFQ
   startTime?: number;
   completionTime?: number;
   waitingTime: number;
@@ -37,7 +39,9 @@ export interface GanttEntry {
 }
 
 export interface SimulationState {
-  queues: Queue[];
+  algorithm: SchedulingAlgorithm;
+  queues: Queue[]; // Used for MLFQ
+  readyQueue: Process[]; // Used for FIFO, SJF, STCF, RR
   currentTime: number;
   isRunning: boolean;
   isPaused: boolean;
@@ -45,4 +49,5 @@ export interface SimulationState {
   ganttChart: GanttEntry[];
   activeProcess: Process | null;
   metrics: SimulationMetrics;
+  rrQuantum: number; // Time quantum for Round Robin
 }

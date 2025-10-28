@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { useSimulationStore } from '@/store/simulationStore';
+import { SchedulingAlgorithm } from '@/types/mlfq';
 import {
   Dialog,
   DialogContent,
@@ -13,9 +14,28 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export const ControlPanel = () => {
-  const { addProcess, numQueues, setNumQueues, queues, setTimeQuantum, agingInterval, setAgingInterval } = useSimulationStore();
+  const { 
+    algorithm, 
+    setAlgorithm,
+    addProcess, 
+    numQueues, 
+    setNumQueues, 
+    queues, 
+    setTimeQuantum, 
+    agingInterval, 
+    setAgingInterval,
+    rrQuantum,
+    setRRQuantum 
+  } = useSimulationStore();
   const [processName, setProcessName] = useState('');
   const [arrivalTime, setArrivalTime] = useState('0');
   const [burstTime, setBurstTime] = useState('10');
@@ -46,57 +66,100 @@ export const ControlPanel = () => {
               Settings
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Simulation Settings</DialogTitle>
               <DialogDescription>
-                Configure MLFQ parameters
+                Configure scheduling algorithm parameters
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div className="space-y-2">
-                <Label htmlFor="numQueues">Number of Queues</Label>
-                <Input
-                  id="numQueues"
-                  type="number"
-                  min="1"
-                  max="5"
-                  value={numQueues}
-                  onChange={(e) => setNumQueues(parseInt(e.target.value) || 1)}
-                />
+                <Label htmlFor="algorithm">Scheduling Algorithm</Label>
+                <Select value={algorithm} onValueChange={(value) => setAlgorithm(value as SchedulingAlgorithm)}>
+                  <SelectTrigger id="algorithm">
+                    <SelectValue placeholder="Select algorithm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FIFO">FIFO / FCFS</SelectItem>
+                    <SelectItem value="SJF">Shortest Job First (SJF)</SelectItem>
+                    <SelectItem value="STCF">Shortest Time to Completion First (STCF)</SelectItem>
+                    <SelectItem value="RR">Round Robin (RR)</SelectItem>
+                    <SelectItem value="MLFQ">Multi-Level Feedback Queue (MLFQ)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              {queues.map((queue) => (
-                <div key={queue.level} className="space-y-2">
-                  <Label htmlFor={`quantum-${queue.level}`}>
-                    Queue {queue.level + 1} Time Quantum (ms)
-                  </Label>
+              {algorithm === 'RR' && (
+                <div className="space-y-2">
+                  <Label htmlFor="rrQuantum">Round Robin Time Quantum (ms)</Label>
                   <Input
-                    id={`quantum-${queue.level}`}
+                    id="rrQuantum"
                     type="number"
                     min="1"
-                    value={queue.timeQuantum}
-                    onChange={(e) => setTimeQuantum(queue.level, parseInt(e.target.value) || 1)}
+                    value={rrQuantum}
+                    onChange={(e) => setRRQuantum(parseInt(e.target.value) || 1)}
                   />
                 </div>
-              ))}
+              )}
 
-              <div className="space-y-2">
-                <Label htmlFor="aging">Aging Interval (ms)</Label>
-                <Input
-                  id="aging"
-                  type="number"
-                  min="1"
-                  value={agingInterval}
-                  onChange={(e) => setAgingInterval(parseInt(e.target.value) || 1)}
-                />
-              </div>
+              {algorithm === 'MLFQ' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="numQueues">Number of Queues</Label>
+                    <Input
+                      id="numQueues"
+                      type="number"
+                      min="1"
+                      max="5"
+                      value={numQueues}
+                      onChange={(e) => setNumQueues(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+
+                  {queues.map((queue) => (
+                    <div key={queue.level} className="space-y-2">
+                      <Label htmlFor={`quantum-${queue.level}`}>
+                        Queue {queue.level + 1} Time Quantum (ms)
+                      </Label>
+                      <Input
+                        id={`quantum-${queue.level}`}
+                        type="number"
+                        min="1"
+                        value={queue.timeQuantum}
+                        onChange={(e) => setTimeQuantum(queue.level, parseInt(e.target.value) || 1)}
+                      />
+                    </div>
+                  ))}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="aging">Aging Interval (ms)</Label>
+                    <Input
+                      id="aging"
+                      type="number"
+                      min="1"
+                      value={agingInterval}
+                      onChange={(e) => setAgingInterval(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
       <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Selected Algorithm</Label>
+          <div className="text-sm font-medium text-primary">
+            {algorithm === 'FIFO' && 'First In, First Out (FCFS)'}
+            {algorithm === 'SJF' && 'Shortest Job First'}
+            {algorithm === 'STCF' && 'Shortest Time to Completion First'}
+            {algorithm === 'RR' && `Round Robin (Quantum: ${rrQuantum}ms)`}
+            {algorithm === 'MLFQ' && 'Multi-Level Feedback Queue'}
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label htmlFor="processName">Process Name</Label>

@@ -1,11 +1,13 @@
 import { create } from 'zustand';
-import { Process, Queue, SimulationState, GanttEntry } from '@/types/mlfq';
+import { Process, Queue, SimulationState, GanttEntry, SchedulingAlgorithm } from '@/types/mlfq';
 
 interface SimulationStore extends SimulationState {
   numQueues: number;
   agingInterval: number;
   boostInterval: number;
 
+  setAlgorithm: (algorithm: SchedulingAlgorithm) => void;
+  setRRQuantum: (quantum: number) => void;
   setQueues: (queues: Queue[]) => void;
   addProcess: (
     process: Omit<
@@ -74,7 +76,9 @@ let simulationInterval: NodeJS.Timeout | null = null;
 let processCounter = 0; // For unique IDs
 
 export const useSimulationStore = create<SimulationStore>((set, get) => ({
+  algorithm: 'MLFQ',
   queues: initialQueues,
+  readyQueue: [],
   currentTime: 0,
   isRunning: false,
   isPaused: false,
@@ -84,6 +88,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   numQueues: 4,
   agingInterval: 10,
   boostInterval: 50,
+  rrQuantum: 4,
   metrics: {
     avgTurnaroundTime: 0,
     avgWaitingTime: 0,
@@ -91,6 +96,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     throughput: 0,
     cpuUtilization: 0,
   },
+
+  setAlgorithm: (algorithm) => set({ algorithm }),
+  
+  setRRQuantum: (quantum) => set({ rrQuantum: quantum }),
 
   setQueues: (queues) => set({ queues }),
 
@@ -105,7 +114,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const id = `P${processCounter}`;
     const arrivalTime = data.arrivalTime ?? 0;
     
-    // CRITICAL: Don't spread data - explicitly set only the fields we need
     const newProcess: Process = {
       id,
       name: data.name,
@@ -122,6 +130,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     console.log('Adding process:', { 
       id, 
+      algorithm: state.algorithm,
       arrivalTime, 
       burstTime: data.burstTime,
       remainingTime: newProcess.remainingTime,
@@ -130,9 +139,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
 
     set((state) => {
-      const updated = [...state.queues];
-      updated[0].processes.push(newProcess);
-      return { queues: updated };
+      if (state.algorithm === 'MLFQ') {
+        const updated = [...state.queues];
+        updated[0].processes.push(newProcess);
+        return { queues: updated };
+      } else {
+        return { readyQueue: [...state.readyQueue, newProcess] };
+      }
     });
   },
 
@@ -215,9 +228,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       clearInterval(simulationInterval);
       simulationInterval = null;
     }
-    processCounter = 0; // Reset process counter
+    processCounter = 0;
     set({
       queues: initialQueues.map((q) => ({ ...q, processes: [] })),
+      readyQueue: [],
       currentTime: 0,
       isRunning: false,
       isPaused: false,
@@ -238,135 +252,101 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     set((state) => {
       if (!state.isRunning || state.isPaused) return state;
 
-      // Deep clone to avoid mutations
-      const queues: Queue[] = JSON.parse(JSON.stringify(state.queues));
-      const currentTime = state.currentTime;
-      const completedProcesses = [...state.completedProcesses];
-      const ganttChart = [...state.ganttChart];
-      
-      // Rule 1: Find highest priority non-empty queue
-      const activeQueueIndex = queues.findIndex(q => q.processes.length > 0);
-      
-      if (activeQueueIndex === -1) {
-        // No processes available - CPU is idle
-        console.log(`Time ${currentTime}: CPU IDLE`);
+      const algorithm = state.algorithm;
+      let result;
+
+      if (algorithm === 'MLFQ') {
+        const { stepMLFQ } = require('./schedulingAlgorithms');
+        const queues: Queue[] = JSON.parse(JSON.stringify(state.queues));
+        result = stepMLFQ(queues, [...state.completedProcesses], [...state.ganttChart], state.currentTime);
         
-        // Check if simulation should end
-        if (completedProcesses.length > 0 && queues.every(q => q.processes.length === 0)) {
-          console.log(`Simulation complete at time ${currentTime}`);
+        // Check if simulation complete
+        if (result.activeProcess === null && result.completedProcesses.length > 0 && result.queues.every(q => q.processes.length === 0)) {
           if (simulationInterval) {
             clearInterval(simulationInterval);
             simulationInterval = null;
           }
-          
-          // Final metrics calculation
-          const allProcesses = [...completedProcesses];
-          const finalMetrics = calculateMetrics(allProcesses, completedProcesses, currentTime);
-          
+          const allProcesses = [...result.completedProcesses];
+          const finalMetrics = calculateMetrics(allProcesses, result.completedProcesses, result.currentTime);
           return {
             ...state,
-            currentTime,
+            queues: result.queues,
+            currentTime: result.currentTime,
             activeProcess: null,
-            queues,
+            completedProcesses: result.completedProcesses,
+            ganttChart: result.ganttChart,
             isRunning: false,
             metrics: finalMetrics,
           };
         }
+
+        const allProcesses = [...result.completedProcesses, ...result.queues.flatMap(q => q.processes)];
+        const newMetrics = calculateMetrics(allProcesses, result.completedProcesses, result.currentTime);
         
-        // Continue idle - increment time
         return {
           ...state,
-          currentTime: currentTime + 1,
-          activeProcess: null,
-          queues
+          queues: result.queues,
+          currentTime: result.currentTime,
+          activeProcess: result.activeProcess,
+          completedProcesses: result.completedProcesses,
+          ganttChart: result.ganttChart,
+          metrics: newMetrics,
         };
-      }
-
-      // Rule 2: Get process from front of queue (FIFO within queue)
-      const activeQueue = queues[activeQueueIndex];
-      const process = activeQueue.processes.shift()!;
-      
-      // Set response time on FIRST execution only
-      if (process.responseTime === undefined) {
-        process.responseTime = currentTime - process.arrivalTime;
-        console.log(`Time ${currentTime}: ${process.id} gets CPU for FIRST time (Response Time: ${process.responseTime})`);
-      }
-
-      // Run CONTINUOUSLY for up to the queue's time quantum or until completion
-      const remainingQuantum = activeQueue.timeQuantum - (process.quantumUsed || 0);
-      const runDuration = Math.max(1, Math.min(process.remainingTime, remainingQuantum));
-      const runStart = currentTime;
-      const runEnd = currentTime + runDuration;
-
-      process.remainingTime -= runDuration;
-      process.quantumUsed += runDuration;
-      process.state = 'running';
-
-      console.log(`Time ${runStart}-${runEnd}: Running ${process.id} (Q${activeQueueIndex}) for ${runDuration} units | Remaining: ${process.remainingTime}, Quantum: ${process.quantumUsed}/${activeQueue.timeQuantum}`);
-
-      // Add a single Gantt entry for this continuous run
-      ganttChart.push({
-        processId: process.id,
-        processName: process.name,
-        startTime: runStart,
-        endTime: runEnd,
-        queueLevel: activeQueue.level,
-      });
-
-      // Rule 4: Check if process completed
-      if (process.remainingTime <= 0) {
-        process.state = 'completed';
-        process.completionTime = runEnd;
-        process.turnaroundTime = process.completionTime - process.arrivalTime;
-        process.waitingTime = process.turnaroundTime - process.burstTime;
+      } else {
+        // For other algorithms, use readyQueue
+        const { stepFIFO, stepSJF, stepSTCF, stepRR } = require('./schedulingAlgorithms');
+        const readyQueue = JSON.parse(JSON.stringify(state.readyQueue));
         
-        completedProcesses.push(process);
-        
-        console.log(`Time ${runEnd}: ${process.id} COMPLETED`);
-        console.log(`  Metrics - Turnaround: ${process.turnaroundTime}, Waiting: ${process.waitingTime}, Response: ${process.responseTime}`);
-        
-        // Calculate metrics with updated completed processes
-        const allProcesses = [...completedProcesses, ...queues.flatMap(q => q.processes)];
-        const newMetrics = calculateMetrics(allProcesses, completedProcesses, runEnd);
+        switch (algorithm) {
+          case 'FIFO':
+            result = stepFIFO(readyQueue, [...state.completedProcesses], [...state.ganttChart], state.currentTime);
+            break;
+          case 'SJF':
+            result = stepSJF(readyQueue, [...state.completedProcesses], [...state.ganttChart], state.currentTime);
+            break;
+          case 'STCF':
+            result = stepSTCF(readyQueue, [...state.completedProcesses], [...state.ganttChart], state.currentTime);
+            break;
+          case 'RR':
+            result = stepRR(readyQueue, [...state.completedProcesses], [...state.ganttChart], state.currentTime, state.rrQuantum);
+            break;
+          default:
+            return state;
+        }
+
+        // Check if simulation complete
+        if (result.activeProcess === null && result.completedProcesses.length > 0 && result.readyQueue.length === 0) {
+          if (simulationInterval) {
+            clearInterval(simulationInterval);
+            simulationInterval = null;
+          }
+          const allProcesses = [...result.completedProcesses];
+          const finalMetrics = calculateMetrics(allProcesses, result.completedProcesses, result.currentTime);
+          return {
+            ...state,
+            readyQueue: result.readyQueue,
+            currentTime: result.currentTime,
+            activeProcess: null,
+            completedProcesses: result.completedProcesses,
+            ganttChart: result.ganttChart,
+            isRunning: false,
+            metrics: finalMetrics,
+          };
+        }
+
+        const allProcesses = [...result.completedProcesses, ...result.readyQueue];
+        const newMetrics = calculateMetrics(allProcesses, result.completedProcesses, result.currentTime);
         
         return {
           ...state,
-          queues,
-          currentTime: runEnd,
-          activeProcess: null,
-          completedProcesses,
-          ganttChart,
+          readyQueue: result.readyQueue,
+          currentTime: result.currentTime,
+          activeProcess: result.activeProcess,
+          completedProcesses: result.completedProcesses,
+          ganttChart: result.ganttChart,
           metrics: newMetrics,
         };
       }
-
-      // Rule 3 and 5: Check if quantum expired -> demote
-      if (process.quantumUsed >= activeQueue.timeQuantum) {
-        const nextLevel = Math.min(activeQueueIndex + 1, queues.length - 1);
-        process.quantumUsed = 0; // Reset when moving to new queue
-        process.state = 'waiting';
-        queues[nextLevel].processes.push(process);
-        console.log(`Time ${runEnd}: ${process.id} quantum expired, demoted from Q${activeQueueIndex} to Q${nextLevel}`);
-      } else {
-        // Not typical in standard MLFQ, but support for preemption scenarios
-        process.state = 'waiting';
-        activeQueue.processes.push(process);
-        console.log(`Time ${runEnd}: ${process.id} returns to back of Q${activeQueueIndex} (quantum: ${process.quantumUsed}/${activeQueue.timeQuantum})`);
-      }
-
-      // Update metrics after this run block
-      const allProcesses = [...completedProcesses, ...queues.flatMap(q => q.processes)];
-      const newMetrics = calculateMetrics(allProcesses, completedProcesses, runEnd);
-
-      return {
-        ...state,
-        queues,
-        currentTime: runEnd,
-        activeProcess: process,
-        ganttChart,
-        completedProcesses,
-        metrics: newMetrics,
-      };
     });
   },
 

@@ -8,7 +8,7 @@ import { GanttChart } from '@/components/GanttChart';
 import { Activity } from 'lucide-react';
 
 const Index = () => {
-  const { queues, currentTime, activeProcess } = useSimulationStore();
+  const { algorithm, queues, readyQueue, currentTime, activeProcess } = useSimulationStore();
 
   // REMOVED: The duplicate simulation loop that was causing issues
   // The simulation is now handled entirely by simulationStore.ts
@@ -24,9 +24,13 @@ const Index = () => {
                 <Activity className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold">MLFQ Simulator</h1>
+                <h1 className="text-2xl font-bold">CPU Scheduling Simulator</h1>
                 <p className="text-sm text-muted-foreground">
-                  Multi-Level Feedback Queue Scheduling Visualizer
+                  {algorithm === 'FIFO' && 'First In, First Out (FCFS)'}
+                  {algorithm === 'SJF' && 'Shortest Job First'}
+                  {algorithm === 'STCF' && 'Shortest Time to Completion First (Preemptive SJF)'}
+                  {algorithm === 'RR' && 'Round Robin'}
+                  {algorithm === 'MLFQ' && 'Multi-Level Feedback Queue'}
                 </p>
               </div>
             </div>
@@ -54,19 +58,29 @@ const Index = () => {
             </div>
           </div>
 
-          {/* Queues */}
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Ready Queues</h2>
+          {/* Queues - Show different views based on algorithm */}
+          {algorithm === 'MLFQ' ? (
             <div className="space-y-4">
-              {queues.map((queue) => (
-                <QueueVisualizer
-                  key={queue.level}
-                  queue={queue}
-                  activeProcessId={activeProcess?.id || null}
-                />
-              ))}
+              <h2 className="text-xl font-semibold">Ready Queues</h2>
+              <div className="space-y-4">
+                {queues.map((queue) => (
+                  <QueueVisualizer
+                    key={queue.level}
+                    queue={queue}
+                    activeProcessId={activeProcess?.id || null}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Ready Queue</h2>
+              <QueueVisualizer
+                queue={{ level: 0, timeQuantum: 0, processes: readyQueue }}
+                activeProcessId={activeProcess?.id || null}
+              />
+            </div>
+          )}
 
           {/* Gantt Chart */}
           <GanttChart />
