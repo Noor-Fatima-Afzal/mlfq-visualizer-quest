@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Process, Queue, SimulationState, GanttEntry, SchedulingAlgorithm } from '@/types/mlfq';
+import { stepMLFQ, stepFIFO, stepSJF, stepSTCF, stepRR } from './schedulingAlgorithms';
 
 interface SimulationStore extends SimulationState {
   numQueues: number;
@@ -256,7 +257,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       let result;
 
       if (algorithm === 'MLFQ') {
-        const { stepMLFQ } = require('./schedulingAlgorithms');
         const queues: Queue[] = JSON.parse(JSON.stringify(state.queues));
         result = stepMLFQ(queues, [...state.completedProcesses], [...state.ganttChart], state.currentTime);
         
@@ -294,7 +294,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         };
       } else {
         // For other algorithms, use readyQueue
-        const { stepFIFO, stepSJF, stepSTCF, stepRR } = require('./schedulingAlgorithms');
         const readyQueue = JSON.parse(JSON.stringify(state.readyQueue));
         
         switch (algorithm) {
