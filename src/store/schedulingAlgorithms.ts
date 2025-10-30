@@ -153,25 +153,36 @@ export const stepSTCF = (
     process.responseTime = currentTime - process.arrivalTime;
   }
 
-  // Run for 1 time unit (preemptive)
-  process.remainingTime -= 1;
+  // Check if any process in readyQueue will arrive before this process completes
+  // If yes, run until that arrival; otherwise run to completion
+  const nextArrivalTime = readyQueue.reduce((minArrival, p) => 
+    p.arrivalTime > currentTime && p.arrivalTime < minArrival ? p.arrivalTime : minArrival, 
+    Infinity
+  );
+  
+  const timeToRun = nextArrivalTime === Infinity 
+    ? process.remainingTime 
+    : Math.min(process.remainingTime, nextArrivalTime - currentTime);
+
+  // Run the process for calculated time
+  process.remainingTime -= timeToRun;
   process.state = 'running';
 
   ganttChart.push({
     processId: process.id,
     processName: process.name,
     startTime: currentTime,
-    endTime: currentTime + 1,
+    endTime: currentTime + timeToRun,
     queueLevel: 0,
   });
 
   if (process.remainingTime <= 0) {
     process.state = 'completed';
-    process.completionTime = currentTime + 1;
+    process.completionTime = currentTime + timeToRun;
     process.turnaroundTime = process.completionTime - process.arrivalTime;
     process.waitingTime = process.turnaroundTime - process.burstTime;
     completedProcesses.push(process);
-    console.log(`STCF: Time ${currentTime + 1}: ${process.id} completed`);
+    console.log(`STCF: Time ${currentTime + timeToRun}: ${process.id} completed`);
   } else {
     readyQueue.push(process);
   }
@@ -180,7 +191,7 @@ export const stepSTCF = (
     readyQueue,
     completedProcesses,
     ganttChart,
-    currentTime: currentTime + 1,
+    currentTime: currentTime + timeToRun,
     activeProcess: process,
   };
 };
