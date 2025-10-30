@@ -135,16 +135,30 @@ export const stepSTCF = (
   currentTime: number;
   activeProcess: Process | null;
 } => {
-  if (readyQueue.length === 0) {
-    if (completedProcesses.length > 0) {
+  // Filter to only processes that have arrived
+  const arrivedProcesses = readyQueue.filter(p => p.arrivalTime <= currentTime);
+  
+  if (arrivedProcesses.length === 0) {
+    if (completedProcesses.length > 0 && readyQueue.length === 0) {
       return { readyQueue, completedProcesses, ganttChart, currentTime, activeProcess: null };
+    }
+    // If no arrived processes but more to come, advance time to next arrival
+    const nextArrival = readyQueue.reduce((min, p) => 
+      p.arrivalTime > currentTime && p.arrivalTime < min ? p.arrivalTime : min, 
+      Infinity
+    );
+    if (nextArrival !== Infinity) {
+      return { readyQueue, completedProcesses, ganttChart, currentTime: nextArrival, activeProcess: null };
     }
     return { readyQueue, completedProcesses, ganttChart, currentTime: currentTime + 1, activeProcess: null };
   }
 
-  // Find process with shortest remaining time
-  const shortestIndex = readyQueue.reduce((minIdx, proc, idx, arr) => 
-    proc.remainingTime < arr[minIdx].remainingTime ? idx : minIdx, 0);
+  // Find process with shortest remaining time among arrived processes
+  const shortestIndex = readyQueue.reduce((minIdx, proc, idx, arr) => {
+    if (proc.arrivalTime > currentTime) return minIdx;
+    if (arr[minIdx].arrivalTime > currentTime) return idx;
+    return proc.remainingTime < arr[minIdx].remainingTime ? idx : minIdx;
+  }, 0);
   
   const process = readyQueue.splice(shortestIndex, 1)[0];
 
@@ -153,13 +167,14 @@ export const stepSTCF = (
     process.responseTime = currentTime - process.arrivalTime;
   }
 
-  // Check if any process in readyQueue will arrive before this process completes
-  // If yes, run until that arrival; otherwise run to completion
+  // Check if any process will arrive before this process completes
+  // that might have a shorter remaining time
   const nextArrivalTime = readyQueue.reduce((minArrival, p) => 
     p.arrivalTime > currentTime && p.arrivalTime < minArrival ? p.arrivalTime : minArrival, 
     Infinity
   );
   
+  // Run until next arrival or completion, then re-evaluate
   const timeToRun = nextArrivalTime === Infinity 
     ? process.remainingTime 
     : Math.min(process.remainingTime, nextArrivalTime - currentTime);
@@ -184,7 +199,10 @@ export const stepSTCF = (
     completedProcesses.push(process);
     console.log(`STCF: Time ${currentTime + timeToRun}: ${process.id} completed`);
   } else {
+    // Put back in queue for re-evaluation (preemption)
+    process.state = 'waiting';
     readyQueue.push(process);
+    console.log(`STCF: Time ${currentTime + timeToRun}: ${process.id} preempted, remaining: ${process.remainingTime}`);
   }
 
   return {
